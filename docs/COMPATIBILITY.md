@@ -1,82 +1,92 @@
 # Compatibility
 
-Compatibility is an explicit allowlist, not an assumption inferred from an
-upstream product name or version label. The separate
-[update-isolation contract](UPDATE_ISOLATION.md) protects official installation
-and update autonomy even when no compatible injection is available.
+Compatibility is capability-specific evidence, not an assumption inferred
+from a provider name, model label, endpoint response, or successful model-list
+request. The official ChatGPT/Codex host remains the capability authority.
 
-## Compatibility Identity
+## Provider Configuration Gate
 
-Every supported combination has one immutable manifest entry containing at
-least:
+Provider registration is allowed only when all configuration checks pass:
 
-- host adapter: `direct` or `codexplusplus`;
-- the executable's exact SHA-256 digest used as its binary identity;
-- the exact Codex Administrator project version;
-- the exact bootstrap contract version; and
-- the accepted E2E evidence SHA-256 digest.
+- the wire API is `responses`;
+- the base URL is syntactically valid and ends in `/v1`;
+- remote endpoints use HTTPS, with HTTP limited to loopback development;
+- `env_key` is a valid uppercase environment-variable name; and
+- no credential value is present in persisted configuration or evidence.
 
-Every SHA-256 digest required by the selected adapter is mandatory. Publisher
-and version metadata cannot replace one. Entries are not wildcarded across
-binary digests, host adapters, product channels, or architectures. Runtime
-identities for Grok Build and Codex app-server are gated independently from the
-desktop host identity.
+When a reviewed model catalog is supplied, it must be a bounded JSON file with
+a non-empty `models` array, the required official model-entry fields, and the
+exact selected model slug. Catalog metadata does not override capability
+evidence; it is the official host input that reflects already-reviewed
+evidence.
 
-## Decision Table
+Invalid configuration fails closed: the Grok provider is not registered or
+updated, existing configuration is preserved, and official host startup is not
+blocked.
 
-| Observed state | Project injection | Official host launch |
+## Capability Decision Table
+
+| Observed state | Grok capability claim | Official host behavior |
 | --- | --- | --- |
-| Every required identity exactly matches the manifest and accepted E2E evidence | Allowed for the listed adapter and capabilities | Continue |
-| Any required binary is missing or has an unknown/changed SHA-256 digest | Disabled | Continue in unmodified `native_gpt_main` |
-| Identity probe cannot read or hash the binary | Disabled | Continue in unmodified `native_gpt_main` |
-| Manifest or evidence is missing, invalid, or revoked | Disabled | Continue in unmodified `native_gpt_main` |
-| Bootstrap health fails after injection | Dispose project UI and disable injection | Restore/continue `native_gpt_main` |
+| Model identifier is visible but no capability evidence exists | Unsupported | Continue unchanged |
+| Endpoint or authentication validation fails | Provider unavailable | Continue with existing providers |
+| Responses text and streaming pass through the official host | Allow only those validated behaviors | Keep native controls |
+| A tool, approval, sandbox, workspace, session, or cancellation behavior is unknown or differs | Unsupported for that behavior | Do not bypass or emulate it |
+| Complete capability-specific E2E evidence is accepted | Allow only the exact validated model/provider/capability combination | Continue under host ownership |
 
-No network lookup, version similarity, or successful one-off mount may bypass
-this table. A host update cannot be blocked while maintainers prepare a new
-entry.
+No CLI probe, ACP handshake, version similarity, model-list result, or one-off
+successful prompt may bypass this table.
 
-## E2E Evidence Matrix
+## Evidence Matrix
 
-A compatibility entry requires reproducible evidence from a clean installation
-of the exact binary identity. At minimum, the matrix covers:
+Every published capability claim must identify the official host version, OS,
+architecture, provider endpoint identity, model identifier, project revision,
+test implementation, result, and immutable evidence digest. Evidence should
+cover the exact capability being claimed, including failure behavior.
 
-1. Official host launch and native GPT use with injection disabled.
-2. Unknown-identity fallback with no bootstrap, CDP mutation, or startup block.
-3. Grok UI mount, mode switching, disposal, and complete official UI
-   restoration.
-4. Renderer navigation, target recreation, host restart, and project restart.
-5. Grok session create/resume/cancel and Codex app-server subtask execution.
-6. Approvals, cancellation, workspace/worktree ownership, and process-tree
-   cleanup.
-7. Bootstrap or companion failure after launch and recovery to
-   `native_gpt_main`.
-8. Uninstall against a populated official profile, proving that only
-   ledger-recorded project artifacts are removed.
+The machine-readable manifest schema binds the evidence digest to
+`grok_native`, one or more exact model identifiers, and explicit booleans for
+Responses, streaming, tool calls, parallel tool calls, image input, file input,
+structured outputs, reasoning summaries, and WebSockets. Unknown fields are
+rejected and omitted capabilities remain disabled.
 
-Evidence must identify the OS build, architecture, adapter, all required binary
-SHA-256 digests, project commit/release, test implementation, result, and
-immutable artifact digest. A screenshot alone or an undocumented manual
-assertion is insufficient.
+The matrix treats these as separate claims:
 
-The alpha `compatibility.json` intentionally has no accepted host entries. A
-locally detected digest is never auto-enrolled.
+1. Provider configuration without persisted secrets, plus explicit reversible
+   model selection for native desktop launch.
+2. Authentication failure with the official host remaining usable.
+3. Text response and streaming behavior through the official host.
+4. Tool-call request, approval, execution, and result round-trip.
+5. Sandbox and workspace containment with no provider-side bypass.
+6. Cancellation, retry, resume, and session-history behavior.
+7. Structured outputs, image input, and reasoning metadata when advertised.
+8. Provider disablement or removal preserving unrelated user configuration.
 
-## Manifest Governance
+A screenshot, model-list result, or undocumented manual assertion is
+insufficient.
 
-- New identities enter the manifest only through review of the full matrix.
-- A changed required binary digest requires a new entry and new evidence even
-  when its version string is unchanged.
-- Failed or vulnerable combinations are revoked; revocation disables project
-  injection without changing the official installation.
-- Local manifest edits do not constitute published support.
-- CI schema checks are necessary but do not replace Windows E2E evidence.
+The repository's live Codex mock-provider tests currently cover configuration,
+thread selection, Responses SSE text streaming, one host-owned function-tool
+round trip, and local PNG input conversion. Real Grok endpoint authentication,
+model-specific reasoning, shell/exec-server environments, approvals,
+cancellation, structured outputs, and every additional modality remain separate
+evidence rows.
+
+## Model Visibility Is Not Parity
+
+Different models exposed by one provider can have different capabilities. A
+visible Grok identifier does not inherit the tools, permissions, context,
+modalities, structured-output behavior, or reliability of another Grok or GPT
+model. Aliases and newly discovered identifiers start with no capability claims
+until separately validated.
 
 ## Compatibility Limits
 
-Codex Administrator cannot guarantee that an unannounced upstream change will
-preserve undocumented DOM, Electron, process, CDP, user-script, ACP, or
-app-server behavior. The project guarantees fail-closed isolation and native
-startup for unknown identities; it guarantees injection compatibility only for
-the exact combinations backed by a published manifest entry and accepted E2E
-evidence.
+Codex Administrator cannot guarantee undocumented provider or host behavior
+across upstream changes. Unknown behavior fails closed at the provider or
+capability boundary; it must not trigger a Grok CLI/ACP fallback or changes to
+official installations.
+
+Legacy compatibility manifests and evidence for Grok UI injection, Grok Build,
+or ACP are historical artifacts only. They do not establish active support for
+the canonical native-provider route.

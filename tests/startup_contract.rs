@@ -73,7 +73,7 @@ fn guarded_startup_prepares_injection_only_for_an_exact_approved_identity() {
 
     assert_eq!(
         outcome.decision.effective_mode(),
-        AgentMode::GrokInjectedMain
+        AgentMode::GrokNativeModel
     );
     assert!(outcome.bootstrap.is_some());
     assert!(outcome.isolation_error.is_none());

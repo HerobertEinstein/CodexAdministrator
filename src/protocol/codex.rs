@@ -52,6 +52,62 @@ pub fn thread_start_request(id: Value) -> Value {
     })
 }
 
+pub fn initialize_request_with_experimental_api(id: Value, client: ClientInfo<'_>) -> Value {
+    json!({
+        "id": id,
+        "method": "initialize",
+        "params": {
+            "clientInfo": {
+                "name": client.name,
+                "title": client.title,
+                "version": client.version,
+            },
+            "capabilities": {
+                "experimentalApi": true
+            }
+        }
+    })
+}
+
+pub fn thread_start_with_model_request(
+    id: Value,
+    model_provider: &str,
+    model: &str,
+    cwd: &str,
+) -> Value {
+    json!({
+        "id": id,
+        "method": "thread/start",
+        "params": {
+            "modelProvider": model_provider,
+            "model": model,
+            "cwd": cwd,
+        }
+    })
+}
+
+pub fn thread_start_with_model_and_controls_request(
+    id: Value,
+    model_provider: &str,
+    model: &str,
+    cwd: &str,
+    approval_policy: &str,
+    sandbox: &str,
+) -> Value {
+    json!({
+        "id": id,
+        "method": "thread/start",
+        "params": {
+            "modelProvider": model_provider,
+            "model": model,
+            "cwd": cwd,
+            "approvalPolicy": approval_policy,
+            "sandbox": sandbox,
+            "environments": [],
+        }
+    })
+}
+
 pub fn thread_resume_request(id: Value, thread_id: &str) -> Value {
     json!({
         "id": id,
@@ -67,6 +123,48 @@ pub fn turn_start_text_request(id: Value, thread_id: &str, text: &str) -> Value 
         "params": {
             "threadId": thread_id,
             "input": [{ "type": "text", "text": text }]
+        }
+    })
+}
+
+pub fn turn_start_text_and_local_image_request(
+    id: Value,
+    thread_id: &str,
+    text: &str,
+    image_path: &str,
+) -> Value {
+    json!({
+        "id": id,
+        "method": "turn/start",
+        "params": {
+            "threadId": thread_id,
+            "input": [
+                { "type": "text", "text": text },
+                { "type": "localImage", "path": image_path }
+            ]
+        }
+    })
+}
+
+pub fn turn_start_text_with_workspace_controls_request(
+    id: Value,
+    thread_id: &str,
+    text: &str,
+    writable_root: &str,
+) -> Value {
+    json!({
+        "id": id,
+        "method": "turn/start",
+        "params": {
+            "threadId": thread_id,
+            "input": [{ "type": "text", "text": text }],
+            "approvalPolicy": "never",
+            "sandboxPolicy": {
+                "type": "workspaceWrite",
+                "writableRoots": [writable_root],
+                "networkAccess": false,
+            },
+            "environments": [],
         }
     })
 }

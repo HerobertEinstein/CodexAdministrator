@@ -1,50 +1,42 @@
 ---
 type: decision
-status: active
+status: superseded
 created: 2026-07-13
 updated: 2026-07-13
 scope: project
 paths:
-  - src/jsonl.rs
-  - src/runtime_process.rs
-  - src/runtime_client.rs
-  - src/protocol/
   - docs/RUNTIME_ADAPTERS.md
+  - src/protocol/
+  - src/runtime_client.rs
 verified_by:
-  - cargo test --all-targets
-  - cargo check --all-targets
-  - cargo test --test codex_live -- --ignored --nocapture
+  - historical repository state before Grok CLI/ACP removal
 ---
-# Native Runtime Process And Protocol Boundary
+# Superseded Grok CLI And ACP Runtime Boundary
 
 ## Summary
 
-Grok and Codex use their own native protocols over direct child-process JSONL.
-Codex uses app-server messages without a `jsonrpc` member. Grok uses ACP v1
-JSON-RPC 2.0. Shared code owns only framing, request correlation, stderr
-separation, timeouts, and lifecycle containment.
+The project previously explored separate child-process runtimes: Codex over
+app-server JSONL and Grok CLI/Grok Build over ACP v1 JSON-RPC. That design made
+Grok a separate main-agent route with its own session and permission protocol.
 
-The official runtime node is the `@xai-official/grok` package and `grok`
-executable. `grok-build` is a coding-agent/model profile within that CLI, not a
-separate executable. Other identifiers returned by `grok models` require their
-own capability and E2E proof. The official Grok Build Claude Code plugin invokes
-the same CLI and is not another runtime.
-
-On Windows, runtime process trees are assigned to a kill-on-close Job Object.
-Shell wrappers are never executed. The official npm Codex installation is
-resolved to `node.exe` plus the absolute `@openai/codex/bin/codex.js` path;
-WindowsApps desktop-package resources are not treated as generic CLI entries.
+The route was abandoned for security reasons. It is not an active adapter,
+fallback, compatibility target, or support claim. Current architecture uses the
+official ChatGPT/Codex host as the sole agent runtime and limits Grok to a
+Responses-compatible model provider.
 
 ## Evidence
 
-Unit and integration tests cover out-of-order string/numeric IDs, notifications,
-server requests, timeout cleanup, protocol message shapes, initialization order,
-stderr separation, and Job Object execution. The environment-gated live Codex
-test completed official `initialize -> initialized -> thread/start` on Windows.
+- Grok protocol/client/process support is being removed from `src/` and tests.
+- `docs/ARCHITECTURE.md` and `docs/RUNTIME_ADAPTERS.md` define the replacement
+  native-provider boundary.
 
 ## Use Next Time
 
-Do not merge the Codex and Grok wire formats. Do not invoke `.cmd`, PowerShell,
-TUI parsing, or `codex exec` as the primary parity path. Add real turn, approval,
-resume, cancellation, and authenticated Grok E2E evidence before claiming those
-capabilities complete.
+Do not restore Grok CLI, Grok Build, ACP, TUI parsing, or another Grok-owned
+tool/approval/session loop as a fallback. Historical details may be retained
+only when clearly marked superseded.
+
+## Related / Supersedes
+
+Superseded by
+[Native Host And Grok Model Provider Boundary](native-model-provider-boundary.md).

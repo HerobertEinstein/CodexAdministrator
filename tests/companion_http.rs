@@ -39,7 +39,7 @@ async fn state_endpoints_reject_unauthenticated_requests_without_cors() {
 }
 
 #[tokio::test]
-async fn bearer_authorization_reads_and_updates_the_main_agent_mode() {
+async fn bearer_authorization_reads_and_updates_the_model_selection_intent() {
     let app = app();
     let state_response = app
         .clone()
@@ -66,7 +66,7 @@ async fn bearer_authorization_reads_and_updates_the_main_agent_mode() {
                 .header(header::AUTHORIZATION, format!("Bearer {CAPABILITY}"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    json!({ "mode": AgentMode::GrokInjectedMain }).to_string(),
+                    json!({ "mode": AgentMode::GrokNativeModel }).to_string(),
                 ))
                 .unwrap(),
         )
@@ -74,7 +74,7 @@ async fn bearer_authorization_reads_and_updates_the_main_agent_mode() {
         .unwrap();
     assert_eq!(update_response.status(), StatusCode::OK);
     let state = response_json(update_response).await;
-    assert_eq!(state["mode"], "grok_injected_main");
+    assert_eq!(state["mode"], "grok_native_model");
     assert_eq!(state["revision"], 1);
 }
 

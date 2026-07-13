@@ -179,6 +179,6 @@ impl CompatibilityDecision {
     }
 
     pub const fn injection_enabled(&self) -> bool {
-        matches!(self, Self::Enabled(AgentMode::GrokInjectedMain))
+        matches!(self, Self::Enabled(AgentMode::GrokNativeModel))
     }
 }

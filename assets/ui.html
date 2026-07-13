@@ -2,67 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light dark">
-    <title>Grok Workspace</title>
+    <meta name="referrer" content="no-referrer">
+    <title>Grok Provider Bridge</title>
     <script src="/ui/app.js" defer></script>
-    <style>
-      :root { font-family: "Segoe UI Variable", "Segoe UI", sans-serif; color: CanvasText; background: Canvas; }
-      * { box-sizing: border-box; }
-      body { margin: 0; min-width: 320px; min-height: 100vh; }
-      .shell { min-height: 100vh; display: grid; grid-template-columns: 240px minmax(0, 1fr) 280px; }
-      .sidebar, .activity { padding: 18px 14px; background: color-mix(in srgb, Canvas 96%, CanvasText); }
-      .sidebar { border-right: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
-      .activity { border-left: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
-      .brand { height: 36px; display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 650; }
-      .mark { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 6px; color: Canvas; background: CanvasText; font-size: 12px; }
-      nav { margin-top: 18px; display: grid; gap: 4px; }
-      nav button { width: 100%; height: 34px; padding: 0 10px; border: 0; border-radius: 6px; text-align: left; color: inherit; background: transparent; font: inherit; }
-      nav button[aria-current="page"] { background: color-mix(in srgb, CanvasText 9%, transparent); }
-      .main { min-width: 0; display: grid; grid-template-rows: 54px minmax(0, 1fr) auto; }
-      header { display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid color-mix(in srgb, CanvasText 10%, transparent); }
-      h1 { margin: 0; font-size: 14px; font-weight: 650; }
-      .status { display: flex; align-items: center; gap: 7px; font-size: 12px; color: color-mix(in srgb, CanvasText 65%, transparent); }
-      .dot { width: 7px; height: 7px; border-radius: 50%; background: #21a366; }
-      .conversation { width: min(820px, 100%); margin: 0 auto; padding: 28px 24px; }
-      .message { max-width: 680px; font-size: 14px; line-height: 1.65; }
-      .message strong { display: block; margin-bottom: 5px; font-size: 12px; }
-      .composer { width: min(820px, calc(100% - 32px)); margin: 0 auto 18px; min-height: 92px; padding: 14px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); border-radius: 8px; background: color-mix(in srgb, Canvas 98%, CanvasText); box-shadow: 0 5px 18px rgba(0,0,0,.08); }
-      .composer textarea { width: 100%; min-height: 42px; resize: none; border: 0; outline: 0; color: inherit; background: transparent; font: 14px/1.5 inherit; }
-      .composer footer { display: flex; justify-content: flex-end; }
-      .composer button { width: 30px; height: 30px; border: 0; border-radius: 6px; color: Canvas; background: CanvasText; font-size: 16px; }
-      .activity h2 { margin: 3px 0 16px; font-size: 12px; font-weight: 650; text-transform: uppercase; }
-      .event { padding: 10px 0; border-top: 1px solid color-mix(in srgb, CanvasText 9%, transparent); font-size: 12px; line-height: 1.5; }
-      .event span { display: block; color: color-mix(in srgb, CanvasText 58%, transparent); }
-      @media (max-width: 900px) { .shell { grid-template-columns: 200px minmax(0, 1fr); } .activity { display: none; } }
-      @media (max-width: 640px) { .shell { grid-template-columns: 1fr; } .sidebar, .status { display: none; } .conversation { padding-inline: 16px; } }
-    </style>
   </head>
-  <body>
-    <div class="shell">
-      <aside class="sidebar">
-        <div class="brand"><span class="mark">G</span> Grok Workspace</div>
-        <nav aria-label="Workspace">
-          <button type="button" aria-current="page">Current task</button>
-          <button type="button">Parallel sessions</button>
-          <button type="button">Memory</button>
-          <button type="button">Evolution</button>
-        </nav>
-      </aside>
-      <section class="main">
-        <header><h1>Untitled task</h1><div class="status"><span class="dot"></span>Grok ready</div></header>
-        <div class="conversation">
-          <div class="message"><strong>Grok</strong>Start a task here. Codex subagent and parallel-session controls will appear in the activity stream.</div>
-        </div>
-        <form class="composer" data-composer>
-          <textarea aria-label="Message" placeholder="Message Grok"></textarea>
-          <footer><button type="submit" aria-label="Send">&#8593;</button></footer>
-        </form>
-      </section>
-      <aside class="activity">
-        <h2>Activity</h2>
-        <div class="event">Companion connected<span>Native runtime probes pending</span></div>
-      </aside>
-    </div>
-  </body>
+  <body hidden></body>
 </html>

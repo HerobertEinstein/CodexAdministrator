@@ -26,6 +26,7 @@ impl RuntimeProcess {
 
         let mut child = Command::new(&spec.executable)
             .args(&spec.args)
+            .envs(&spec.env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -128,7 +129,6 @@ fn spawn_stderr_reader(
 
 fn runtime_name(spec: &RuntimeLaunchSpec) -> &'static str {
     match spec.kind {
-        crate::RuntimeKind::Grok => "Grok",
         crate::RuntimeKind::Codex => "Codex",
     }
 }

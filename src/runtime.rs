@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     env,
     path::{Path, PathBuf},
     process::Stdio,
@@ -12,7 +13,6 @@ use tokio::process::Command;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeKind {
-    Grok,
     Codex,
 }
 
@@ -35,7 +35,6 @@ pub struct RuntimeProbe {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeProtocol {
-    AcpV1JsonLines,
     CodexAppServerJsonLines,
 }
 
@@ -44,24 +43,12 @@ pub struct RuntimeLaunchSpec {
     pub kind: RuntimeKind,
     pub executable: PathBuf,
     pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
     pub protocol: RuntimeProtocol,
     pub use_shell: bool,
 }
 
 impl RuntimeLaunchSpec {
-    pub fn grok(executable: PathBuf) -> Self {
-        Self {
-            kind: RuntimeKind::Grok,
-            executable,
-            args: ["agent", "--no-leader", "stdio"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
-            protocol: RuntimeProtocol::AcpV1JsonLines,
-            use_shell: false,
-        }
-    }
-
     pub fn codex(executable: PathBuf) -> Self {
         Self {
             kind: RuntimeKind::Codex,
@@ -70,6 +57,7 @@ impl RuntimeLaunchSpec {
                 .into_iter()
                 .map(str::to_owned)
                 .collect(),
+            env: BTreeMap::new(),
             protocol: RuntimeProtocol::CodexAppServerJsonLines,
             use_shell: false,
         }
@@ -84,6 +72,7 @@ impl RuntimeLaunchSpec {
                 "app-server".into(),
                 "--stdio".into(),
             ],
+            env: BTreeMap::new(),
             protocol: RuntimeProtocol::CodexAppServerJsonLines,
             use_shell: false,
         }

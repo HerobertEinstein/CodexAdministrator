@@ -5,56 +5,52 @@ created: 2026-07-13
 updated: 2026-07-13
 scope: project
 paths:
-  - README.md
+  - src/native_provider.rs
   - docs/UPDATE_ISOLATION.md
   - docs/COMPATIBILITY.md
 verified_by:
-  - git diff --check -- README.md docs .agent_memory
-  - local Markdown link resolution check on 2026-07-13
+  - cargo test --test native_model_provider
+  - git diff --check -- docs .agent_memory
 ---
-# Update Isolation And Compatibility Identity
+# Update Isolation And Provider Configuration Ownership
 
 ## Summary
 
 Codex Administrator is external to official ChatGPT/Codex and Codex++
-installations. It must never modify or block their installation or update
-mechanisms. Injection is permitted only when every host-side executable required
-by the selected adapter has an exact SHA-256 identity in the compatibility
-manifest with accepted E2E evidence. Any unknown or unreadable required identity
-disables project injection and continues with the official host in unmodified
-`native_gpt_main`.
+installations and update mechanisms. It must never modify, block, pin, spoof,
+or roll back them. The active Grok integration is limited to a
+Responses-compatible provider entry in supported user-owned configuration.
 
-Uninstall/fallback deletes only the fixed namespaced project bootstrap and exact
-configuration key. Even when the bootstrap lives in a Codex++ external data
-directory, its surrounding official/user data must remain untouched.
+The entry contains an environment-variable reference only. Invalid provider
+configuration fails closed and leaves official startup, existing providers,
+and unrelated settings unchanged. Explicit Grok launch changes only the
+supported selection fields and keeps their previous values for fail-closed
+restoration.
 
 ## Evidence
 
-- `docs/UPDATE_ISOLATION.md` defines upstream ownership, launch fallback, and
-  uninstall boundaries.
-- `docs/COMPATIBILITY.md` defines exact manifest identity and the required E2E
-  evidence matrix.
-- `README.md` states the user-facing guarantee and its compatibility limit.
+- `docs/UPDATE_ISOLATION.md` defines installation, updater, configuration, and
+  removal boundaries.
+- `docs/COMPATIBILITY.md` defines fail-closed provider and capability gates.
+- `tests/native_model_provider.rs` checks non-persistence of secrets,
+  preservation of unrelated fields and defaults, idempotence, and validation.
 
 ## Use Next Time
 
-For any host, adapter, bootstrap, update, or uninstall change, preserve these
-invariants:
+1. Never write into official ChatGPT/Codex or Codex++ installation or updater
+   state.
+2. Store only environment-variable names, never credential values.
+3. Preserve unrelated and future configuration fields; change model selection
+   only for explicit launch and retain its exact restorable predecessor.
+4. Fail closed at the provider or capability boundary without blocking the
+   official host.
+5. Remove only exact project-owned configuration and files.
 
-1. Never write to or gate an official installation or updater.
-2. Never trust a version string in place of every required binary's exact
-   SHA-256 identity.
-3. Never enable injection without a reviewed manifest entry plus E2E evidence.
-4. Always allow unknown identities to start natively without project injection.
-5. Delete only the exact namespaced artifacts owned by this project; never
-   recursively clean a host data directory.
-
-Treat a request to "survive official updates" as update isolation plus a tested
-compatibility allowlist, not as permission to patch upstream files or promise
-unverified forward compatibility.
+Treat requests for Grok support as native-host model-provider work, not as
+permission to add a Grok CLI/ACP agent runtime or patch an official product.
 
 ## Related / Supersedes
 
-This entry is the project memory source for update isolation. Architecture and
-implementation details may refine mechanisms, but must not weaken these
-boundaries without an explicit reviewed decision.
+This entry replaces the earlier injection-focused update-isolation mechanism
+while preserving the stronger invariant that official products and their
+updaters remain untouched.

@@ -15,16 +15,16 @@ fn policy() -> CompatibilityPolicy {
 }
 
 #[test]
-fn verified_host_versions_may_enable_the_requested_main_agent_mode() {
+fn verified_host_versions_may_enable_the_requested_model_selection_bridge() {
     let decision = policy().evaluate(
         HostAdapterKind::CodexPlusPlus,
         Some(&"b".repeat(64)),
-        AgentMode::GrokInjectedMain,
+        AgentMode::GrokNativeModel,
     );
 
     assert_eq!(
         decision,
-        CompatibilityDecision::Enabled(AgentMode::GrokInjectedMain)
+        CompatibilityDecision::Enabled(AgentMode::GrokNativeModel)
     );
 }
 
@@ -33,13 +33,13 @@ fn unknown_host_versions_fail_closed_to_native_gpt() {
     let decision = policy().evaluate(
         HostAdapterKind::CodexPlusPlus,
         Some(&"c".repeat(64)),
-        AgentMode::GrokInjectedMain,
+        AgentMode::GrokNativeModel,
     );
 
     assert_eq!(
         decision,
         CompatibilityDecision::NativeOnly {
-            requested: AgentMode::GrokInjectedMain,
+            requested: AgentMode::GrokNativeModel,
             reason: "unverified_host_identity".into(),
         }
     );
@@ -48,7 +48,7 @@ fn unknown_host_versions_fail_closed_to_native_gpt() {
 
 #[test]
 fn missing_version_evidence_never_enables_injection() {
-    let decision = policy().evaluate(HostAdapterKind::Direct, None, AgentMode::GrokInjectedMain);
+    let decision = policy().evaluate(HostAdapterKind::Direct, None, AgentMode::GrokNativeModel);
 
     assert_eq!(decision.effective_mode(), AgentMode::NativeGptMain);
     assert!(!decision.injection_enabled());
@@ -117,7 +117,7 @@ fn compatibility_manifest_accepts_only_exact_binary_identities() {
             .evaluate(
                 HostAdapterKind::CodexPlusPlus,
                 Some(&"d".repeat(64)),
-                AgentMode::GrokInjectedMain,
+                AgentMode::GrokNativeModel,
             )
             .injection_enabled()
     );
@@ -126,7 +126,7 @@ fn compatibility_manifest_accepts_only_exact_binary_identities() {
             .evaluate(
                 HostAdapterKind::CodexPlusPlus,
                 Some(&"e".repeat(64)),
-                AgentMode::GrokInjectedMain,
+                AgentMode::GrokNativeModel,
             )
             .injection_enabled()
     );

@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf, time::Duration};
+use std::{collections::BTreeMap, env, path::PathBuf, time::Duration};
 
 use codex_administrator::{RuntimeKind, RuntimeLaunchSpec, RuntimeProcess, RuntimeProtocol};
 use serde_json::json;
@@ -14,7 +14,8 @@ async fn launches_a_runtime_without_a_shell_and_separates_jsonl_from_stderr() {
         "$line=[Console]::In.ReadLine();",
         "[Console]::Error.WriteLine('fixture-stderr');",
         "$message=$line|ConvertFrom-Json;",
-        "$response=[ordered]@{id=$message.id;result=[ordered]@{ok=$true}};",
+        "$envValue=[Environment]::GetEnvironmentVariable('CODEX_ADMIN_TEST_ENV');",
+        "$response=[ordered]@{id=$message.id;result=[ordered]@{ok=$true;env=$envValue}};",
         "[Console]::Out.WriteLine(($response|ConvertTo-Json -Compress -Depth 5));"
     );
     let spec = RuntimeLaunchSpec {
@@ -27,6 +28,7 @@ async fn launches_a_runtime_without_a_shell_and_separates_jsonl_from_stderr() {
             "-Command".into(),
             script.into(),
         ],
+        env: BTreeMap::from([("CODEX_ADMIN_TEST_ENV".into(), "isolated".into())]),
         protocol: RuntimeProtocol::CodexAppServerJsonLines,
         use_shell: false,
     };
@@ -43,6 +45,7 @@ async fn launches_a_runtime_without_a_shell_and_separates_jsonl_from_stderr() {
 
     assert_eq!(response["id"], "request-1");
     assert_eq!(response["result"]["ok"], true);
+    assert_eq!(response["result"]["env"], "isolated");
     assert_eq!(
         process.stderr_mut().recv().await.as_deref(),
         Some("fixture-stderr")
@@ -53,10 +56,11 @@ async fn launches_a_runtime_without_a_shell_and_separates_jsonl_from_stderr() {
 #[tokio::test]
 async fn rejects_runtime_specs_that_request_shell_execution() {
     let spec = RuntimeLaunchSpec {
-        kind: RuntimeKind::Grok,
+        kind: RuntimeKind::Codex,
         executable: PathBuf::from(r"C:\Windows\System32\cmd.exe"),
         args: vec![],
-        protocol: RuntimeProtocol::AcpV1JsonLines,
+        env: BTreeMap::new(),
+        protocol: RuntimeProtocol::CodexAppServerJsonLines,
         use_shell: true,
     };
 

@@ -1,7 +1,8 @@
 # Codex Administrator Project Memory
 
-Read active entries before changing launcher, host-adapter, injection,
-compatibility, update, or uninstall behavior.
+Read active entries before changing provider configuration, capability
+validation, official-host integration, update isolation, or removal behavior.
 
-- [Update isolation and compatibility identity](decisions/update-isolation-contract.md)
-- [Native runtime process and protocol boundary](decisions/native-runtime-boundary.md)
+- [Native host and Grok model provider boundary](decisions/native-model-provider-boundary.md)
+- [Update isolation and provider configuration ownership](decisions/update-isolation-contract.md)
+- [Superseded Grok CLI and ACP runtime boundary](decisions/native-runtime-boundary.md) (historical only)

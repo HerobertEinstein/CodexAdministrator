@@ -1,71 +1,116 @@
-# Native Runtime Adapters
+# Native Host And Model Provider Boundary
 
-## Grok CLI And Grok Build
+## Official Host Authority
 
-The native runtime is the official `@xai-official/grok` package and its `grok`
-executable. Grok Build is a coding-agent/model profile available through that
-CLI, not a second executable or transport. The adapter launches:
+The official ChatGPT/Codex host is the runtime. It owns prompts, tools,
+approvals, sandbox enforcement, workspace access, sessions, compaction,
+credentials, cancellation, and errors. Codex Administrator does not recreate
+or proxy those capabilities through another agent process.
 
-```text
-grok.exe agent --no-leader stdio
+The project does not launch Grok CLI, Grok Build, or an ACP process as the main
+agent. It also does not launch a separate Codex app-server in order to give
+Grok its own agent loop. Host-native behavior must stay on the official host's
+supported execution path.
+
+## Grok Responses Provider
+
+Grok is integrated only as a Responses-compatible model provider. The
+supported configuration shape is equivalent to:
+
+```toml
+[model_providers.grok_native]
+name = "Grok in native ChatGPT/Codex"
+base_url = "https://gateway.example/v1"
+env_key = "GROK_NATIVE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
 ```
 
-The transport is ACP protocol version 1 over JSON lines on stdin/stdout. It supports `session/new`, `session/load`, `session/prompt`, and `session/cancel`, plus structured message, thought, tool, and plan updates.
+`env_key` is an uppercase environment-variable name. The secret itself must be
+supplied by the environment and must never be written to configuration, logs,
+receipts, evidence, or source control. Provider registration preserves
+unrelated configuration. Explicit Grok launch selects the requested model
+through the official persisted configuration surface.
 
-`grok models` may expose profiles other than `grok-build`. Discovery proves only
-that the CLI lists an identifier. Each profile still needs its own capability
-probe and E2E evidence before it inherits Grok Build tool, permission, session,
-or coding-environment claims.
+Remote provider URLs must use HTTPS and end in `/v1`. Plain HTTP is allowed
+only for loopback development endpoints, and query strings are rejected.
+WebSocket support is disabled unless the endpoint and official host path have
+both been explicitly validated.
 
-The adapter does not parse the TUI, invoke a shell, use `npx`, parse human `sessions list` output, or redistribute the proprietary Grok binary. Installation must use the official npm registry and independently verify the package integrity and reported agent version.
+The launcher selects the provider through the official user configuration:
 
-The official `xai-org/grok-build-plugin-cc` project is a Claude Code bridge that
-invokes the same `grok` CLI. It is not an alternative Grok runtime or GUI host.
-
-On Windows the Grok process tree must run in a Job Object. Cancellation first sends `session/cancel`, then closes stdin and terminates the Job Object after a bounded timeout. Cancellation does not imply filesystem rollback.
-
-## Codex
-
-The adapter resolves the installed official Codex CLI without invoking a shell.
-For a standalone executable it launches:
-
-```text
-codex.exe app-server --stdio
+```toml
+model_provider = "grok_native"
+model = "<model>"
+model_catalog_json = "<reviewed-catalog>"
 ```
 
-For the official npm installation it resolves the wrapper to its owned runtime
-and launches the equivalent command directly:
+It then invokes `codex app <workspace>`. Official Codex 0.142.3 discards root
+`-c` overrides in the `app` dispatch path, so treating those flags as desktop
+selection would be a false integration claim.
 
-```text
-node.exe <absolute-path-to-@openai/codex/bin/codex.js> app-server --stdio
-```
+For an npm Codex installation, the launcher calls `node.exe` plus the absolute
+official `@openai/codex/bin/codex.js` entrypoint directly. It does not execute a
+shell wrapper. The API key value is inherited from the named environment
+variable and is not added to the process arguments.
 
-It never executes `codex.cmd`, PowerShell wrappers, or the ACL-protected
-`WindowsApps` desktop-package resource as a generic CLI entry.
+The model catalog remains a project-owned evidence artifact outside official
+installations. It must contain the selected Grok slug, satisfy the required
+official model-entry shape, and advertise only capabilities already accepted
+for that exact model/provider combination. The launcher additionally requires
+the installed official Codex runtime to parse it successfully through `debug
+models` before changing the active selection.
 
-The transport is the official bidirectional JSONL app-server protocol. The client sends `initialize`, waits for its response, sends `initialized`, and then uses `thread/start` or `thread/resume`, `turn/start`, and `turn/interrupt`.
+The previous native selection is stored in a credential-free sidecar. Repeated
+Grok launches preserve the original backup. `launch-native` restores it only
+when the current managed fields still match, so a later manual user choice is
+never overwritten.
 
-The companion preserves thread and turn identities separately. Approval requests
-are answered with the original server-request id. Codex app-server messages do
-not add a `jsonrpc` field. The experimental WebSocket transport and Unix-only
-daemon lifecycle are not used on Windows.
+## Fail-Closed Validation
 
-`codex exec --json` is a fallback for bounded non-interactive work only. It cannot provide full approval, user-input, or dynamic tool behavior and is not the native parity transport.
+A model appearing in discovery or a selector proves only identifier
+visibility. Before a capability is described as supported, evidence must show
+that the exact model/provider combination completes it through the official
+host while retaining host-owned approvals, sandbox, workspace, and session
+semantics.
 
-## Shared rules
+Validation is capability-specific. At minimum, streaming, tool calls,
+structured outputs, image input, cancellation, resume, and reasoning metadata
+are independent claims. Unknown events, fields, or behavior do not inherit
+support from another model.
 
-- Each native runtime owns its prompts, tools, approvals, session history, compaction, credentials, and errors.
-- The companion normalizes lifecycle events for display but does not replay one runtime's tool calls through another.
-- Exact executable and protocol versions are part of the compatibility identity.
-- Unknown events are preserved and ignored safely until their capability is understood.
-- Runtime stdout is protocol-only; stderr is diagnostic-only and secrets are redacted.
-- Every Windows runtime is assigned to a Job Object with kill-on-close so the
-  launcher cannot leave a detached process tree after exit.
+The code-level capability contract defaults every field to disabled. Native
+Codex agent readiness requires verified Responses, streaming, and tool calls;
+multimodal readiness separately requires verified image and file input.
 
-## Current proof
+If endpoint, authentication, protocol, model, or capability validation fails:
 
-The repository has deterministic protocol/transport tests for both runtimes and
-a Windows environment-gated Codex test that has completed a real official
-`initialize -> initialized -> thread/start` sequence. Real Codex turns, approval
-UI, resume behavior, authenticated Grok sessions, and Grok permission prompts
-still require their separate E2E gates before parity is claimed.
+- do not expose the failed capability as supported;
+- do not fall back to Grok CLI, Grok Build, ACP, or a custom tool runner;
+- do not weaken approvals, sandboxing, or workspace restrictions; and
+- leave the official host and existing providers operational.
+
+## Current Automated Proof
+
+Against installed official Codex 0.142.3, isolated live tests now prove:
+
+- strict custom Responses provider configuration and `thread/start` model
+  selection;
+- SSE text deltas reaching `item/agentMessage/delta`;
+- an `update_plan` function call executed by the official host, with matching
+  `function_call_output` returned in the second Responses request; and
+- a valid local PNG converted by the official host into Responses
+  `input_image` content.
+
+These tests use a loopback mock provider and dummy environment credential. They
+prove the host/provider contract, not that a particular xAI/Grok endpoint has
+passed it. Standalone app-server shell/workspace execution additionally depends
+on an official exec-server environment and remains a separate E2E gate.
+
+## Historical Note
+
+The repository previously explored direct child-process adapters for Grok ACP
+and Codex app-server, including Grok Build support claims. That architecture is
+superseded and must not be presented as an active route. Historical references
+are useful only when clearly marked as rejected context.

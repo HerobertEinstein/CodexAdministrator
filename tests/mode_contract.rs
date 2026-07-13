@@ -1,10 +1,10 @@
 use codex_administrator::{AgentMode, ModeState};
 
 #[test]
-fn serializes_the_two_public_main_agent_modes() {
+fn serializes_the_two_public_model_selection_intents() {
     assert_eq!(
-        serde_json::to_string(&AgentMode::GrokInjectedMain).unwrap(),
-        r#""grok_injected_main""#
+        serde_json::to_string(&AgentMode::GrokNativeModel).unwrap(),
+        r#""grok_native_model""#
     );
     assert_eq!(
         serde_json::to_string(&AgentMode::NativeGptMain).unwrap(),
@@ -25,9 +25,9 @@ fn starts_in_native_gpt_mode_without_an_active_linked_task() {
 fn mode_changes_increment_revision_and_preserve_the_task_link() {
     let mut state = ModeState::default();
     state.link_task("task-42").unwrap();
-    state.set_mode(AgentMode::GrokInjectedMain);
+    state.set_mode(AgentMode::GrokNativeModel);
 
-    assert_eq!(state.mode, AgentMode::GrokInjectedMain);
+    assert_eq!(state.mode, AgentMode::GrokNativeModel);
     assert_eq!(state.revision, 2);
     assert_eq!(state.task_id.as_deref(), Some("task-42"));
 }

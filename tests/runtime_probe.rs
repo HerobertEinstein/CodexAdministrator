@@ -22,10 +22,10 @@ async fn probes_an_existing_runtime_without_a_shell() {
 
 #[tokio::test]
 async fn reports_a_missing_runtime_without_panicking() {
-    let executable = PathBuf::from(r"C:\definitely-missing\grok.exe");
+    let executable = PathBuf::from(r"C:\definitely-missing\codex.exe");
 
     let result =
-        probe_runtime_version(RuntimeKind::Grok, &executable, Duration::from_secs(1)).await;
+        probe_runtime_version(RuntimeKind::Codex, &executable, Duration::from_secs(1)).await;
 
     assert_eq!(result.status, RuntimeProbeStatus::Missing);
     assert!(result.version.is_none());

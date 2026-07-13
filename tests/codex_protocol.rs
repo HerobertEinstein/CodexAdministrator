@@ -62,6 +62,56 @@ fn constructs_thread_start_and_resume_requests() {
 }
 
 #[test]
+fn constructs_experimental_initialize_capability_negotiation() {
+    let request = codex::initialize_request_with_experimental_api(
+        json!(2),
+        codex::ClientInfo {
+            name: "test-client",
+            title: "Test Client",
+            version: "1.0.0",
+        },
+    );
+
+    assert_eq!(request["params"]["capabilities"]["experimentalApi"], true);
+    assert!(request.get("jsonrpc").is_none());
+}
+
+#[test]
+fn constructs_a_native_provider_thread_without_replacing_host_controls() {
+    let request = codex::thread_start_with_model_request(
+        json!(3),
+        "grok_native",
+        "grok-4",
+        r"D:\Work\project",
+    );
+
+    assert_eq!(request["method"], "thread/start");
+    assert_eq!(request["params"]["modelProvider"], "grok_native");
+    assert_eq!(request["params"]["model"], "grok-4");
+    assert_eq!(request["params"]["cwd"], r"D:\Work\project");
+    assert!(request["params"].get("tools").is_none());
+    assert!(request["params"].get("sandbox").is_none());
+    assert!(request.get("jsonrpc").is_none());
+}
+
+#[test]
+fn constructs_a_native_provider_thread_with_explicit_host_controls() {
+    let request = codex::thread_start_with_model_and_controls_request(
+        json!(4),
+        "grok_native",
+        "grok-4",
+        r"D:\Work\project",
+        "never",
+        "workspace-write",
+    );
+
+    assert_eq!(request["params"]["modelProvider"], "grok_native");
+    assert_eq!(request["params"]["approvalPolicy"], "never");
+    assert_eq!(request["params"]["sandbox"], "workspace-write");
+    assert_eq!(request["params"]["environments"], json!([]));
+}
+
+#[test]
 fn constructs_text_turn_start_and_interrupt_requests() {
     assert_eq!(
         turn_start_text_request(json!(30), "thr_123", "Run tests"),
@@ -85,6 +135,42 @@ fn constructs_text_turn_start_and_interrupt_requests() {
             }
         })
     );
+}
+
+#[test]
+fn constructs_a_native_local_image_turn() {
+    let request = codex::turn_start_text_and_local_image_request(
+        json!(8),
+        "thread-1",
+        "Describe this image",
+        r"D:\Work\project\pixel.png",
+    );
+
+    assert_eq!(request["method"], "turn/start");
+    assert_eq!(request["params"]["input"][0]["type"], "text");
+    assert_eq!(request["params"]["input"][1]["type"], "localImage");
+    assert_eq!(
+        request["params"]["input"][1]["path"],
+        r"D:\Work\project\pixel.png"
+    );
+}
+
+#[test]
+fn constructs_a_text_turn_with_native_workspace_controls() {
+    let request = codex::turn_start_text_with_workspace_controls_request(
+        json!(9),
+        "thread-1",
+        "Run the tool",
+        r"D:\Work\project",
+    );
+
+    assert_eq!(request["params"]["approvalPolicy"], "never");
+    assert_eq!(request["params"]["sandboxPolicy"]["type"], "workspaceWrite");
+    assert_eq!(
+        request["params"]["sandboxPolicy"]["writableRoots"][0],
+        r"D:\Work\project"
+    );
+    assert_eq!(request["params"]["environments"], json!([]));
 }
 
 #[test]

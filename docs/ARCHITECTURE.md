@@ -1,35 +1,100 @@
 # Architecture
 
-## V1 modes
+## Canonical Topology
 
-`grok_injected_main` and `native_gpt_main` identify the native runtime that owns the main-agent loop. They are not model aliases.
+The official ChatGPT/Codex host is the only main-agent host. It owns the native
+agent loop, tool execution, approvals, sandbox policy, workspace access,
+session history, compaction, cancellation, and user interaction.
 
-The companion keeps a canonical task identity and maps it to runtime-owned sessions. Native transcripts remain owned by their respective clients. Shared state contains reviewed preferences, durable facts, decisions, checkpoints, and evolution records.
+Codex Administrator may register a Grok endpoint as a Responses-compatible
+model provider through the official host's supported user configuration. Grok
+supplies model inference only. It does not become a second agent runtime and
+does not receive an independent tool, approval, sandbox, workspace, or session
+implementation from this project.
 
-## Process boundary
+The native launch path atomically writes the supported user-owned
+`model_provider` and `model` fields, then invokes the official `codex app`
+workspace-open command without ineffective `-c` arguments. Provider
+registration alone does not change the default model; an explicit `launch`
+does select Grok for the official host.
 
-The Windows launcher selects one host adapter. `direct` activates the official ChatGPT/Codex host with a loopback-only remote debugging endpoint and owns the sole CDP injection lifecycle. Optional `codexplusplus` launches an installed official Codex++ release and mounts the same project-owned bootstrap through its supported extension surface. The adapters are mutually exclusive for one host instance.
+Before that selection, the launcher records the previous model, provider, and
+catalog path in a project-owned sidecar outside official installation
+directories. `launch-native` restores those exact values only while the active
+configuration still matches the project-managed Grok selection. Manual user
+changes cause restoration to fail closed.
 
-The companion binds a random loopback port and renders a per-launch namespaced bootstrap. It does not modify official application files or Codex++ binaries.
+Reviewed Grok model metadata is supplied through the official
+`model_catalog_json` configuration surface. The launcher validates that the
+catalog is a bounded JSON file using the required official model-entry shape
+and containing the selected exact model slug before persisting its absolute
+path. The installed official Codex runtime then parses the same file through
+`debug models`; rejection stops launch. A missing catalog leaves Codex fallback
+metadata in effect and cannot be described as full model parity.
 
-The bootstrap mounts a small mode control. Grok mode displays a companion-served, same-origin UI. Native mode disposes all layout, focus, keyboard, and visibility overrides and returns control to the official page.
+## Modes
 
-## Runtime adapters
+`grok_native_model` and `native_gpt_main` are model-selection intents within
+the same official host. They are not runtime, process, protocol, or capability
+aliases. Switching models must not replace or bypass host-owned controls.
 
-Each adapter owns its native process and session identifiers. The common broker contract covers probing, capability negotiation, starting or resuming a session, submitting a turn, streaming events, approval decisions, cancellation, checkpoints, and health.
+The host remains usable when the Grok provider is absent, invalid,
+unauthenticated, incompatible, or disabled. Failure to select Grok never
+blocks native host startup.
 
-Unknown versions and capabilities fail closed. A model name alone never enables a capability.
+## Provider Boundary
+
+The Grok provider contract is limited to the Responses wire API at a validated
+`/v1` endpoint. Remote endpoints require HTTPS; plain HTTP is accepted only for
+an explicit loopback endpoint. Provider configuration stores the name of an
+environment variable, never the credential value.
+
+The project may update only the supported, user-owned provider and explicit
+selection fields. It preserves unrelated settings. Registration alone does
+not change the user's selection; `launch` changes it deliberately and keeps a
+restorable backup.
+
+## Capability Validation
+
+Model discovery proves only that the host or endpoint exposes a model
+identifier. It does not prove parity with native GPT models or any other model.
+Streaming, tool calls, structured outputs, image input, reasoning metadata,
+resume behavior, cancellation, and every other capability require separate
+validation through the official host path.
+
+Unknown, missing, or contradictory capability evidence fails closed. The
+project must not synthesize parity through a Grok CLI, ACP bridge, custom tool
+runner, relaxed approval policy, broader sandbox, or hidden fallback. The
+provider remains unavailable for the unsupported operation, while the official
+host and its existing providers continue unchanged.
+
+`NativeProviderCapabilityManifest` records exact model identifiers, explicit
+capability booleans, and an immutable evidence SHA-256 digest. Omitted fields
+default to `false`; a manifest for one model never grants another model the
+same capabilities.
+
+## Ownership And Updates
+
+Official ChatGPT/Codex and Codex++ installations, binaries, packages,
+signatures, profiles, updater services, update settings, and update channels
+remain publisher-owned. Codex Administrator does not patch, vendor, replace,
+pin, delay, or roll back them. It also does not install a Grok main-agent route
+into either product.
+
+Project-owned configuration and evidence must remain outside official
+installation directories. Removing or disabling the provider may remove only
+the exact project-owned provider entry; it must preserve all other user and
+host data.
 
 ## Concurrency
 
-One agent owns write access to a checkout at a time. Parallel agents use disjoint write sets or separate worktrees. The task graph records leases and terminal state so restart and cancellation cannot silently create two writers.
+The official host remains the authority for workspace and session ownership.
+At the project level, one agent owns write access to a checkout at a time.
+Parallel agents use disjoint write sets or separate worktrees.
 
-## Reference boundary
+## Superseded Route
 
-Codex++ is an architectural reference and optional external host adapter. Codex Administrator does not link, vendor, patch, or copy it. Only the `codexplusplus` adapter consumes its supported user-script and lifecycle surfaces; the direct adapter and shared core do not.
-
-Implementation is derived independently from Windows, Electron, and CDP public interfaces, official runtime behavior, and project-owned tests. The direct adapter health-checks and reinjects through its own CDP session. The Codex++ adapter version-gates recovery and never adds a second injector.
-
-## Update isolation
-
-Host updates are independent and never patched or blocked. Each adapter must report an exact executable SHA-256 identity that exists in the embedded compatibility manifest for the current project/bootstrap versions and accepted E2E evidence before Grok injection is enabled. Unknown identities fail closed to native GPT mode; they do not prevent the official host from launching. The Codex++ adapter removes only its namespaced external bootstrap and configuration key during fallback.
+An earlier design explored a companion-served Grok main-agent UI backed by the
+official Grok CLI and ACP. That route was abandoned for security reasons. It is
+historical context only and is not an active adapter, fallback, compatibility
+target, or support claim.

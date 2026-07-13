@@ -58,7 +58,7 @@ pub fn prepare_codex_plus_host_guarded(
     let decision = policy.evaluate(
         HostAdapterKind::CodexPlusPlus,
         identity_sha256,
-        AgentMode::GrokInjectedMain,
+        AgentMode::GrokNativeModel,
     );
 
     if decision.injection_enabled() {
@@ -82,7 +82,7 @@ pub fn prepare_codex_plus_host_guarded(
                 };
                 return CodexPlusStartupOutcome {
                     decision: CompatibilityDecision::NativeOnly {
-                        requested: AgentMode::GrokInjectedMain,
+                        requested: AgentMode::GrokNativeModel,
                         reason: "bootstrap_prepare_failed".into(),
                     },
                     bootstrap: None,

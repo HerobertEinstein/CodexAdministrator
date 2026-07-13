@@ -1,12 +1,18 @@
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    path::PathBuf,
+    process::{Command as ProcessCommand, Stdio},
+};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use codex_administrator::{
-    BootstrapConfig, CompanionContext, CompatibilityDecision, CompatibilityManifest,
-    CompatibilityPolicy, HostAdapterKind, HostIdentity, build_companion_router,
-    discover_codex_runtime, generate_capability, launch_host_executable,
-    prepare_codex_plus_host_guarded, remove_codex_plus_bootstrap,
+    BootstrapConfig, CodexNativeAppLaunchSpec, CompanionContext, CompatibilityDecision,
+    CompatibilityManifest, CompatibilityPolicy, GrokNativeProviderConfig, HostAdapterKind,
+    HostIdentity, build_codex_native_app_launch, build_companion_router, discover_codex_runtime,
+    generate_capability, install_grok_native_provider_for_model, launch_host_executable,
+    prepare_codex_plus_host_guarded, remove_codex_plus_bootstrap, restore_native_model_selection,
+    validate_codex_model_catalog_with_runtime,
 };
 use directories::BaseDirs;
 use serde::Serialize;
@@ -16,7 +22,7 @@ use tokio::net::TcpListener;
 #[command(
     name = "codex-administrator",
     version,
-    about = "Open-source Windows dual-main-agent launcher and injected GUI companion"
+    about = "Open-source Windows launcher for native ChatGPT/Codex model providers"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -25,8 +31,40 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Launch(LaunchArgs),
+    LaunchNative(LaunchNativeArgs),
     Serve(ServeArgs),
     Doctor(DoctorArgs),
+}
+
+#[derive(Debug, Args)]
+struct LaunchArgs {
+    #[arg(long, value_name = "MODEL")]
+    model: String,
+
+    #[arg(long, value_name = "URL")]
+    base_url: String,
+
+    #[arg(long, value_name = "ENV", default_value = "XAI_API_KEY")]
+    env_key: String,
+
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
+
+    #[arg(long, value_name = "FILE")]
+    model_catalog: Option<PathBuf>,
+
+    #[arg(long, value_name = "DIR", default_value = ".")]
+    workspace: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct LaunchNativeArgs {
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
+
+    #[arg(long, value_name = "DIR", default_value = ".")]
+    workspace: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -53,9 +91,139 @@ struct DoctorArgs {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
+        Command::Launch(args) => launch_grok_native(args),
+        Command::LaunchNative(args) => launch_native(args),
         Command::Serve(args) => serve(args).await,
         Command::Doctor(args) => doctor(args),
     }
+}
+
+fn launch_grok_native(args: LaunchArgs) -> Result<()> {
+    let provider = GrokNativeProviderConfig {
+        base_url: args.base_url,
+        env_key: args.env_key,
+        supports_websockets: false,
+    };
+    provider.validate()?;
+    let secret_present = env::var_os(&provider.env_key).is_some_and(|value| !value.is_empty());
+    if !secret_present {
+        bail!(
+            "required provider credential environment variable {} is not set",
+            provider.env_key
+        );
+    }
+
+    let workspace = std::fs::canonicalize(&args.workspace).with_context(|| {
+        format!(
+            "failed to resolve Codex workspace {}",
+            args.workspace.display()
+        )
+    })?;
+    if !workspace.is_dir() {
+        bail!(
+            "Codex workspace is not a directory: {}",
+            workspace.display()
+        );
+    }
+    let runtime = discover_codex_runtime()
+        .ok_or_else(|| anyhow::anyhow!("unable to locate the official Codex runtime"))?;
+    let model_catalog = match args.model_catalog {
+        Some(path) => {
+            let path = std::fs::canonicalize(&path).with_context(|| {
+                format!("failed to resolve Codex model catalog {}", path.display())
+            })?;
+            validate_codex_model_catalog_with_runtime(&runtime, &path, &args.model)?;
+            Some(path)
+        }
+        None => None,
+    };
+    let launch = build_codex_native_app_launch(&runtime, &workspace)?;
+    let config = active_codex_config(args.config)?;
+    let receipt = install_grok_native_provider_for_model(
+        &config,
+        &provider,
+        &args.model,
+        model_catalog.as_deref(),
+    )?;
+
+    run_codex_app(&launch, &workspace)?;
+    println!(
+        "{}",
+        serde_json::to_string(&serde_json::json!({
+            "status": "launched",
+            "host": "official_codex_app",
+            "provider": codex_administrator::GROK_NATIVE_PROVIDER_ID,
+            "model": args.model,
+            "model_catalog": model_catalog,
+            "workspace": workspace,
+            "config": config,
+            "config_updated": receipt.updated,
+            "config_sha256": receipt.sha256,
+            "launcher_exit": "success",
+        }))?
+    );
+    Ok(())
+}
+
+fn launch_native(args: LaunchNativeArgs) -> Result<()> {
+    let workspace = std::fs::canonicalize(&args.workspace).with_context(|| {
+        format!(
+            "failed to resolve Codex workspace {}",
+            args.workspace.display()
+        )
+    })?;
+    if !workspace.is_dir() {
+        bail!(
+            "Codex workspace is not a directory: {}",
+            workspace.display()
+        );
+    }
+    let runtime = discover_codex_runtime()
+        .ok_or_else(|| anyhow::anyhow!("unable to locate the official Codex runtime"))?;
+    let launch = build_codex_native_app_launch(&runtime, &workspace)?;
+    let config = active_codex_config(args.config)?;
+    let receipt = restore_native_model_selection(&config)?;
+    run_codex_app(&launch, &workspace)?;
+    println!(
+        "{}",
+        serde_json::to_string(&serde_json::json!({
+            "status": "launched",
+            "host": "official_codex_app",
+            "provider": "restored_native_selection",
+            "workspace": workspace,
+            "config": config,
+            "config_updated": receipt.updated,
+            "config_sha256": receipt.sha256,
+            "launcher_exit": "success",
+        }))?
+    );
+    Ok(())
+}
+
+fn run_codex_app(launch: &CodexNativeAppLaunchSpec, workspace: &std::path::Path) -> Result<()> {
+    let mut command = ProcessCommand::new(&launch.executable);
+    command
+        .args(&launch.args)
+        .current_dir(workspace)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let status = command.status().with_context(|| {
+        format!(
+            "failed to launch official Codex app via {}",
+            launch.executable.display()
+        )
+    })?;
+    if !status.success() {
+        bail!("official Codex app launcher exited with {status}");
+    }
+    Ok(())
 }
 
 async fn serve(args: ServeArgs) -> Result<()> {
@@ -153,7 +321,7 @@ async fn serve_codex_plus(args: ServeArgs) -> Result<()> {
         }
         outcome = codex_administrator::CodexPlusStartupOutcome {
             decision: CompatibilityDecision::NativeOnly {
-                requested: codex_administrator::AgentMode::GrokInjectedMain,
+                requested: codex_administrator::AgentMode::GrokNativeModel,
                 reason: "host_identity_changed_before_launch".into(),
             },
             bootstrap: None,
@@ -215,7 +383,6 @@ fn doctor(args: DoctorArgs) -> Result<()> {
         version: env!("CARGO_PKG_VERSION"),
         platform: env::consts::OS,
         runtimes: RuntimeReport {
-            grok: find_executable("grok.exe"),
             codex: ProbeResult::from_runtime(discover_codex_runtime()),
         },
         hosts: HostReport {
@@ -226,7 +393,6 @@ fn doctor(args: DoctorArgs) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!("Codex Administrator {}", report.version);
-        println!("Grok: {}", display_probe(&report.runtimes.grok));
         println!("Codex: {}", display_probe(&report.runtimes.codex));
         println!("Codex++: {}", display_probe(&report.hosts.codex_plus_plus));
     }
@@ -241,13 +407,26 @@ fn default_appdata() -> Result<PathBuf> {
         })
 }
 
-fn find_executable(name: &str) -> ProbeResult {
-    let path = env::var_os("PATH")
-        .into_iter()
-        .flat_map(|paths| env::split_paths(&paths).collect::<Vec<_>>())
-        .map(|directory| directory.join(name))
-        .find(|candidate| candidate.is_file());
-    ProbeResult::from_path(path)
+fn default_codex_config() -> Result<PathBuf> {
+    if let Some(codex_home) = env::var_os("CODEX_HOME") {
+        return Ok(PathBuf::from(codex_home).join("config.toml"));
+    }
+    BaseDirs::new()
+        .map(|dirs| dirs.home_dir().join(".codex").join("config.toml"))
+        .ok_or_else(|| anyhow::anyhow!("unable to resolve the current user's Codex config path"))
+}
+
+fn active_codex_config(requested: Option<PathBuf>) -> Result<PathBuf> {
+    let default_config = default_codex_config()?;
+    let config = requested.unwrap_or_else(|| default_config.clone());
+    if config != default_config {
+        bail!(
+            "official Codex Desktop reads {}; refusing unrelated config path {}",
+            default_config.display(),
+            config.display()
+        );
+    }
+    Ok(config)
 }
 
 fn find_codex_plus_plus() -> ProbeResult {
@@ -285,7 +464,6 @@ struct DoctorReport {
 
 #[derive(Debug, Serialize)]
 struct RuntimeReport {
-    grok: ProbeResult,
     codex: ProbeResult,
 }
 

@@ -1,7 +1,7 @@
 use codex_administrator::{BootstrapConfig, render_bootstrap};
 
 #[test]
-fn renders_an_idempotent_namespaced_dual_mode_bootstrap() {
+fn renders_an_idempotent_namespaced_native_provider_bridge() {
     let script = render_bootstrap(&BootstrapConfig {
         port: 49_321,
         capability: "test-capability".into(),
@@ -9,7 +9,7 @@ fn renders_an_idempotent_namespaced_dual_mode_bootstrap() {
     .unwrap();
 
     assert!(script.contains("window.__codexAdministrator"));
-    assert!(script.contains("grok_injected_main"));
+    assert!(script.contains("grok_native_model"));
     assert!(script.contains("native_gpt_main"));
     assert!(script.contains("49321"));
     assert!(script.contains("test-capability"));
