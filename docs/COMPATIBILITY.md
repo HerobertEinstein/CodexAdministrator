@@ -1,7 +1,10 @@
 # Compatibility
 
-Compatibility is granted to an exact host executable and bootstrap version,
-not inferred from a product name or a similar release number.
+Codex++ compatibility is granted to an exact reviewed executable identity and
+bootstrap version. Direct compatibility is established from the protected
+official package location, the suspended process image and package family, and
+live isolation, CDP, bridge, and UI gates. Neither path trusts a product name
+alone.
 
 ## Host Gate
 
@@ -16,6 +19,13 @@ not inferred from a product name or a similar release number.
 An unknown, changed, malformed, or unsupported entry fails closed. For
 Codex++, failure removes only this project's stale external script and leaves
 the host native. The shipped alpha manifest is intentionally empty.
+
+Direct accepts only packaged `ChatGPT.exe` under a system `WindowsApps` root.
+Before resuming each created process it verifies the actual image path and the
+official `OpenAI.Codex_2p2nqsd0c76g0` package family. It then requires the CDP
+listener PID to belong to its Job Object and applies target, bridge, and UI
+gates. An update that changes those contracts fails closed and cleans the
+isolated instance without modifying the package.
 
 ## Required Desktop Evidence
 
@@ -34,6 +44,12 @@ Before a host identity is accepted, a fresh desktop run must prove:
 9. a known Grok task resumes through the same provider;
 10. disposal restores the exact prior writable renderer API function; and
 11. an incompatible update leaves the host native.
+
+The current Direct E2E also proves suspended official-package acceptance,
+listener PID ownership, native-menu Grok selection, GPT-5.4 restore,
+renderer-reload reinjection after a transient health disconnect, UI readiness,
+all eight daily PID survivors, and zero isolated process/profile residue. It
+does not prove endpoint feature parity.
 
 Message-level tests are necessary but do not satisfy this desktop gate.
 

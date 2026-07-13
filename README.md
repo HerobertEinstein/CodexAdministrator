@@ -13,7 +13,8 @@ The project has two narrowly separated responsibilities:
    configuration without changing `model`, `model_provider`, or any native GPT
    entry.
 2. Append configured Grok descriptors to a native `model/list` response and add
-   `modelProvider: "grok_native"` only when a Grok model starts a new task or a
+   `modelProvider: "grok_native"` only after that response confirms the model
+   was appended without a native-ID collision, when it starts a new task or a
    previously identified Grok task is resumed.
 
 It does not create another interface or replace the host's execution loop.
@@ -37,12 +38,23 @@ This repository is alpha software and does not yet claim end-to-end Grok
 support in the official desktop application.
 
 - Provider registration is implemented and covered by configuration tests.
-- The model-list and per-task routing bridge is covered by message-level tests.
-- A real official-desktop probe has proved a separate profile, process tree,
-  CDP port, frozen-bridge preservation, writable renderer-API composition,
-  exact disposal, and daily-process survival. Direct injection remains
-  disabled until those checks are enforced by the production launcher and
-  target monitor.
+- The model-list and per-task routing bridge is covered by message-level tests;
+  routing starts empty until a native `model/list` response confirms each
+  append, and a configured ID that collides with a native model remains native.
+- The production Direct launcher now creates a unique profile and `CODEX_HOME`,
+  verifies the suspended image and official package family, assigns each child
+  to a Windows Job Object before resuming it, performs the required two-stage
+  launch, proves the CDP listener PID belongs to that Job, waits for bridge and
+  UI readiness, tolerates bounded renderer-reload transitions, monitors
+  reinjection, rejects reparse-point ancestors, and removes only its instance
+  root during shutdown.
+- A fresh official-desktop E2E on `OpenAI.Codex 26.707.8479.0` preserved the
+  native GPT list, appended Grok once, selected Grok through the native menu,
+  restored GPT-5.4, recovered after a renderer reload and transient health
+  disconnect, preserved all eight daily processes, and left no isolated process
+  or profile residue.
+- This implementation exists only on the feature branch. It is not released or
+  deployed, and it has not been merged into the default branch.
 - The Codex++ adapter writes only an external user script. The shipped
   compatibility manifest is empty, so unverified releases remain native and
   any stale project script is removed.
@@ -66,13 +78,33 @@ The command accepts the environment-variable name only. It never accepts,
 prints, or stores the key value. Remote URLs require HTTPS and must end in
 `/v1`; loopback HTTP is accepted for tests.
 
+Direct instances receive the same provider entry in their isolated
+`CODEX_HOME`; the daily configuration is not used or modified.
+
 ## Model-List Injection
 
-The direct adapter currently fails closed because the production isolated
-launcher is not implemented:
+Validate a Direct launch without creating a profile or starting a process:
 
 ```powershell
-cargo run -- inject --host direct --model grok-4
+cargo run -- inject `
+  --host direct `
+  --model grok-4 `
+  --base-url "https://api.x.ai/v1" `
+  --env-key "XAI_API_KEY" `
+  --no-launch
+```
+
+Remove `--no-launch` to start the owned official instance. The launcher remains
+the foreground lifecycle owner so Ctrl+C, startup failure, target failure, or a
+configured session timeout can terminate only its Job Object and remove only
+its project-owned instance root.
+
+```powershell
+cargo run -- inject `
+  --host direct `
+  --model grok-4 `
+  --base-url "https://api.x.ai/v1" `
+  --env-key "XAI_API_KEY"
 ```
 
 For a separately installed and explicitly verified Codex++ release:
@@ -92,9 +124,9 @@ script when `--no-launch` is omitted.
 
 Codex Administrator never edits official installation directories, packaged
 resources, executables, signatures, the daily profile, updater services,
-update settings, or update channels. A future direct adapter may create only
-its own isolated profile and isolated `CODEX_HOME`; neither path may equal,
-contain, or be contained by a daily path. Project-owned writes are limited to:
+update settings, or update channels. A Direct instance may create only its own
+isolated profile and isolated `CODEX_HOME`; neither path may equal, contain, or
+be contained by a daily path. Project-owned writes are limited to:
 
 - the exact `model_providers.grok_native` entry in user configuration;
 - project-owned isolated profile and `CODEX_HOME` data for a direct instance;
@@ -103,6 +135,10 @@ contain, or be contained by a daily path. Project-owned writes are limited to:
 
 Official updates may require renewed compatibility evidence, but they remain
 fully owned and installed by their publishers.
+
+The provider is an API route inside the official host. The project does not
+bundle, launch, or depend on a separate Grok desktop client, interface, CLI, or
+agent runtime.
 
 ## Development
 

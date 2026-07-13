@@ -28,6 +28,7 @@ async function boot({
   autoDiscoverRendererApi = false,
   bridgeInitiallyAvailable = true,
   frozenBridge = false,
+  models = [grokModel],
   rendererApiAvailable = false,
 } = {}) {
   const [discovery, core, template] = await Promise.all([
@@ -88,7 +89,7 @@ async function boot({
     URL,
     window,
   });
-  const config = JSON.stringify({ version: 2, provider_id: "grok_native", models: [grokModel] });
+  const config = JSON.stringify({ version: 2, provider_id: "grok_native", models });
   vm.runInContext(
     `${discovery}\n${core}\n${template.replace("/*__CODEX_ADMINISTRATOR_CONFIG__*/", config)}`,
     context,
@@ -112,11 +113,33 @@ async function boot({
   };
 }
 
+async function activateInjectedModels(runtime) {
+  const transport = runtime.rendererApi?.postMessage
+    ?? runtime.window.electronBridge?.sendMessageFromView;
+  await transport({
+    type: "mcp-request",
+    request: { id: "activate-models", method: "model/list", params: { cursor: null } },
+  });
+  const listener = runtime.listeners.get("message")[0].listener;
+  listener({
+    data: {
+      type: "mcp-response",
+      message: {
+        id: "activate-models",
+        result: { data: [{ id: "gpt-5.4", model: "gpt-5.4", displayName: "GPT-5.4" }] },
+      },
+    },
+  });
+  runtime.sent.length = 0;
+}
+
 test("bootstrap patches the renderer API without modifying a frozen native bridge", async () => {
-  const { originalSend, rendererApi, sent, window } = await boot({
+  const runtime = await boot({
     frozenBridge: true,
     rendererApiAvailable: true,
   });
+  const { originalSend, rendererApi, sent, window } = runtime;
+  await activateInjectedModels(runtime);
   const grok = {
     type: "mcp-request",
     request: { id: 2, method: "thread/start", params: { model: "grok-4" } },
@@ -156,18 +179,25 @@ test("bootstrap installs after the native bridge becomes available", async () =>
   assert.equal(intervals.size, 0);
 });
 
-test("bootstrap stops retrying when the native bridge never appears", async () => {
+test("bootstrap keeps retrying through slow official cold starts and still stops", async () => {
   const { intervals, window } = await boot({ bridgeInitiallyAvailable: false });
   const retry = intervals.values().next().value;
 
   for (let attempt = 0; attempt < 300; attempt += 1) retry();
+
+  assert.equal(intervals.size, 1);
+  assert.equal(window.__codexAdministrator.health().ok, false);
+
+  for (let attempt = 300; attempt < 1800; attempt += 1) retry();
 
   assert.equal(intervals.size, 0);
   assert.equal(window.__codexAdministrator.health().ok, false);
 });
 
 test("bootstrap patches only Grok new-thread traffic and preserves GPT", async () => {
-  const { sent, window } = await boot();
+  const runtime = await boot();
+  const { sent, window } = runtime;
+  await activateInjectedModels(runtime);
   const gpt = { type: "mcp-request", request: { id: 1, method: "thread/start", params: { model: "gpt-5.4" } } };
   const grok = { type: "mcp-request", request: { id: 2, method: "thread/start", params: { model: "grok-4" } } };
 
@@ -178,6 +208,28 @@ test("bootstrap patches only Grok new-thread traffic and preserves GPT", async (
   assert.equal(sent[1].request.params.model, "grok-4");
   assert.equal(sent[1].request.params.modelProvider, "grok_native");
   assert.equal("modelProvider" in grok.request.params, false);
+});
+
+test("native model-id collisions fail closed before model/list and after reconfigure", async () => {
+  const collision = { ...grokModel, id: "gpt-5.4", model: "gpt-5.4" };
+  const { sent, window } = await boot({ models: [collision] });
+  const request = {
+    type: "mcp-request",
+    request: { id: 11, method: "thread/start", params: { model: "gpt-5.4" } },
+  };
+
+  await window.electronBridge.sendMessageFromView(request);
+  assert.deepEqual(sent[0], request);
+  assert.equal("modelProvider" in sent[0].request.params, false);
+
+  assert.equal(window.__codexAdministrator.configure({
+    version: 2,
+    provider_id: "grok_native",
+    models: [collision],
+  }), true);
+  await window.electronBridge.sendMessageFromView(request);
+  assert.deepEqual(sent[1], request);
+  assert.equal("modelProvider" in sent[1].request.params, false);
 });
 
 test("bootstrap appends Grok to the matching native model/list response", async () => {

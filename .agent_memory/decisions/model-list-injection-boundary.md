@@ -2,7 +2,7 @@
 type: decision
 status: active
 created: 2026-07-13
-updated: 2026-07-13
+updated: 2026-07-14
 scope: project
 paths:
   - assets/bootstrap.js
@@ -23,7 +23,10 @@ registration writes only `model_providers.grok_native`. The message bridge
 preserves every native model and appends Grok descriptors once.
 
 Only a new task selecting Grok, or a model-less resume for an already
-identified Grok task, receives `modelProvider: "grok_native"`. GPT traffic,
+identified Grok task, receives `modelProvider: "grok_native"`. The routable set
+starts empty and is populated only for descriptors actually appended to a
+matched native `model/list` response. Reconfigure clears it. A configured ID
+that collides with a native entry therefore never enters routing. GPT traffic,
 turn traffic, and existing native tasks remain unchanged.
 
 The official host continues to own its interface, tools, approvals, sandbox,
@@ -37,8 +40,9 @@ any additional capability.
   delayed bridge initialization, and disposal.
 - Provider tests cover atomic writes, unrelated-field preservation,
   idempotence, endpoint validation, and secret non-persistence.
-- The direct official desktop adapter remains disabled until real desktop E2E
-  evidence exists.
+- Production Direct desktop E2E now proves native-list preservation, one Grok
+  entry, native-menu Grok selection, GPT-5.4 restoration, renderer-reload
+  reinjection, and exact cleanup. Endpoint capability parity remains unproven.
 
 ## Use Next Time
 

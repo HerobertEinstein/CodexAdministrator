@@ -2,7 +2,7 @@
 type: decision
 status: active
 created: 2026-07-13
-updated: 2026-07-13
+updated: 2026-07-14
 scope: project
 paths:
   - src/host.rs
@@ -25,9 +25,11 @@ for a verified Codex++ executable, its exact external script file and enablement
 key. A direct adapter may create only a project-owned isolated profile and
 isolated `CODEX_HOME`; neither may overlap a daily path.
 
-Unknown host identities fail closed. They do not block the host or alter native
-GPT behavior. Provider registration preserves model selection and unrelated
-configuration.
+Unknown Codex++ executable identities fail closed. Direct instead requires the
+protected official package path, suspended image and package-family identity,
+Job/listener ownership, and live target/bridge/UI gates. Failures do not block
+the publisher host or alter native GPT behavior. Provider registration
+preserves model selection and unrelated configuration.
 
 ## Use Next Time
 

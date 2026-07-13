@@ -90,6 +90,26 @@ impl DirectIsolationContract {
         self.cdp_port
     }
 
+    pub fn verify_owned_root(&self, root: &Path) -> Result<()> {
+        normalized_components(root)
+            .map_err(|error| anyhow::anyhow!("isolated instance root is invalid: {error}"))?;
+        for daily in [&self.daily_profile, &self.daily_codex_home] {
+            if paths_overlap(root, daily)? {
+                bail!(
+                    "isolated instance root {} overlaps daily path {}",
+                    root.display(),
+                    daily.display()
+                );
+            }
+        }
+        if !paths_equal(&root.join("profile"), &self.isolated_profile)?
+            || !paths_equal(&root.join("codex-home"), &self.isolated_codex_home)?
+        {
+            bail!("isolated profile and CODEX_HOME must be exact children of the owned root");
+        }
+        Ok(())
+    }
+
     pub fn initial_launch_arguments(&self) -> Vec<OsString> {
         vec![
             OsString::from(format!(
@@ -128,17 +148,17 @@ impl DirectIsolationContract {
         {
             bail!("isolated process tree overlaps a pre-existing ChatGPT process");
         }
+        if !observation
+            .owned_pids
+            .contains(&observation.cdp_listener_pid)
+        {
+            bail!("isolated CDP listener is not owned by the project process tree");
+        }
         if observation.cdp_port != self.cdp_port {
             bail!("isolated CDP port does not match the launch contract");
         }
         if observation.cdp_target_url.as_deref() != Some("app://-/index.html") {
             bail!("isolated CDP target is not the official app renderer");
-        }
-        if !paths_equal(&observation.observed_profile, &self.isolated_profile)? {
-            bail!("observed profile does not match the isolated profile");
-        }
-        if paths_overlap(&observation.observed_profile, &self.daily_profile)? {
-            bail!("observed profile overlaps the daily profile");
         }
         Ok(())
     }
@@ -148,8 +168,8 @@ impl DirectIsolationContract {
 pub struct IsolatedRuntimeObservation {
     pub preexisting_pids: BTreeSet<u32>,
     pub owned_pids: BTreeSet<u32>,
+    pub cdp_listener_pid: u32,
     pub daily_root_alive: bool,
-    pub observed_profile: PathBuf,
     pub cdp_port: u16,
     pub cdp_target_url: Option<String>,
 }

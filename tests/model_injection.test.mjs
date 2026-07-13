@@ -61,6 +61,30 @@ test("model/list keeps every native GPT entry and appends Grok once", async () =
   assert.deepEqual(response.data.map((entry) => entry.model), ["gpt-5.4", "grok-4"]);
 });
 
+test("a configured native model-id collision never reroutes the native model", async () => {
+  const core = await loadCore();
+  const native = {
+    id: "gpt-5.4",
+    model: "gpt-5.4",
+    displayName: "GPT-5.4",
+  };
+  const configuredCollision = { ...grokModel, id: "gpt-5.4", model: "gpt-5.4" };
+  const response = { data: [native] };
+  const routableGrokModels = new Set(["gpt-5.4"]);
+  const request = {
+    type: "mcp-request",
+    request: { id: 9, method: "thread/start", params: { model: "gpt-5.4" } },
+  };
+
+  assert.equal(core.appendModels(response, [configuredCollision], routableGrokModels), false);
+  assert.deepEqual([...routableGrokModels], []);
+  assert.equal(
+    core.routeProvider(request, routableGrokModels, "grok_native"),
+    request,
+  );
+  assert.equal(response.data[0], native);
+});
+
 test("only Grok thread/start and thread/resume messages receive grok_native", async () => {
   const core = await loadCore();
   const grokModels = new Set(["grok-4"]);

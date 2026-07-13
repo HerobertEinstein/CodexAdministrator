@@ -1,6 +1,8 @@
 use std::{collections::BTreeSet, ffi::OsString, path::PathBuf};
 
-use codex_administrator::{DirectIsolationContract, IsolatedRuntimeObservation};
+use codex_administrator::{
+    DirectInstanceLayout, DirectIsolationContract, IsolatedRuntimeObservation,
+};
 
 fn contract() -> DirectIsolationContract {
     DirectIsolationContract::new(
@@ -89,8 +91,8 @@ fn runtime_gate_accepts_only_a_disjoint_owned_process_tree_and_isolated_cdp_targ
         cdp_port: 9341,
         cdp_target_url: Some("app://-/index.html".into()),
         daily_root_alive: true,
-        observed_profile: contract.isolated_profile().to_path_buf(),
         owned_pids: BTreeSet::from([400, 401, 402]),
+        cdp_listener_pid: 401,
         preexisting_pids: BTreeSet::from([100, 101, 102]),
     };
 
@@ -108,9 +110,9 @@ fn runtime_gate_accepts_only_a_disjoint_owned_process_tree_and_isolated_cdp_targ
     wrong_target.cdp_target_url = Some("app://-/other.html".into());
     assert!(contract.verify_runtime(&wrong_target).is_err());
 
-    let mut wrong_profile = safe;
-    wrong_profile.observed_profile = contract.daily_profile().to_path_buf();
-    assert!(contract.verify_runtime(&wrong_profile).is_err());
+    let mut foreign_listener = safe.clone();
+    foreign_listener.cdp_listener_pid = 999;
+    assert!(contract.verify_runtime(&foreign_listener).is_err());
 }
 
 #[test]
@@ -130,4 +132,39 @@ fn rejects_system_reserved_cdp_ports() {
             .is_err()
         );
     }
+}
+
+#[test]
+fn instance_layout_owns_only_exact_children_of_a_disjoint_root() {
+    let root =
+        PathBuf::from(r"C:\Users\Example\AppData\Local\CodexAdministrator\instances\session-1");
+    let layout = DirectInstanceLayout::new(
+        root.clone(),
+        PathBuf::from(r"C:\Program Files\WindowsApps\OpenAI.Codex\app\ChatGPT.exe"),
+        PathBuf::from(r"C:\Users\Example\AppData\Roaming\Codex\web\Codex"),
+        PathBuf::from(r"C:\Users\Example\.codex"),
+        9341,
+    )
+    .unwrap();
+
+    assert_eq!(layout.root(), root);
+    assert_eq!(layout.contract().isolated_profile(), root.join("profile"));
+    assert_eq!(
+        layout.contract().isolated_codex_home(),
+        root.join("codex-home")
+    );
+    layout.verify_contract(layout.contract()).unwrap();
+}
+
+#[test]
+fn instance_layout_rejects_a_root_that_contains_daily_state() {
+    let result = DirectInstanceLayout::new(
+        PathBuf::from(r"C:\Users\Example"),
+        PathBuf::from(r"C:\Program Files\WindowsApps\OpenAI.Codex\app\ChatGPT.exe"),
+        PathBuf::from(r"C:\Users\Example\AppData\Roaming\Codex\web\Codex"),
+        PathBuf::from(r"C:\Users\Example\.codex"),
+        9341,
+    );
+
+    assert!(result.is_err());
 }

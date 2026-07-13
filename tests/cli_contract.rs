@@ -99,7 +99,23 @@ fn injection_help_exposes_both_host_adapters_without_a_secret_argument() {
 }
 
 #[test]
-fn direct_injection_is_explicitly_disabled_until_the_isolated_launcher_exists() {
+fn direct_no_launch_rejects_a_non_launchable_fixture_without_writing_or_exposing_credentials() {
+    let temp = tempdir().unwrap();
+    let official = temp
+        .path()
+        .join("Program Files")
+        .join("WindowsApps")
+        .join("OpenAI.Codex_test_x64__2p2nqsd0c76g0")
+        .join("app")
+        .join("ChatGPT.exe");
+    fs::create_dir_all(official.parent().unwrap()).unwrap();
+    fs::write(&official, b"not launched").unwrap();
+    let root = temp
+        .path()
+        .join("CodexAdministrator")
+        .join("instances")
+        .join("cli-preflight");
+    let secret = "direct-secret-that-must-never-be-printed";
     let output = Command::new(env!("CARGO_BIN_EXE_codex-administrator"))
         .args([
             "inject",
@@ -107,14 +123,84 @@ fn direct_injection_is_explicitly_disabled_until_the_isolated_launcher_exists() 
             "direct",
             "--model",
             "grok-4",
-            "--no-launch",
+            "--base-url",
+            "https://api.x.ai/v1",
+            "--env-key",
+            "TEST_GROK_KEY",
+            "--official-path",
         ])
+        .arg(&official)
+        .args(["--instance-root"])
+        .arg(&root)
+        .args(["--daily-profile"])
+        .arg(temp.path().join("daily-profile"))
+        .args(["--daily-codex-home"])
+        .arg(temp.path().join("daily-codex-home"))
+        .args(["--cdp-port", "9341", "--no-launch"])
+        .env("TEST_GROK_KEY", secret)
         .output()
         .unwrap();
 
     assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("isolated launcher is not implemented"));
+    let rendered = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(rendered.contains("direct launch is restricted"));
+    assert!(!rendered.contains(secret));
+    assert!(!root.exists());
+}
+
+#[test]
+fn direct_preflight_fails_before_writing_when_the_credential_environment_is_missing() {
+    let temp = tempdir().unwrap();
+    let official = temp
+        .path()
+        .join("Program Files")
+        .join("WindowsApps")
+        .join("OpenAI.Codex_test_x64__2p2nqsd0c76g0")
+        .join("app")
+        .join("ChatGPT.exe");
+    fs::create_dir_all(official.parent().unwrap()).unwrap();
+    fs::write(&official, b"not launched").unwrap();
+    let root = temp
+        .path()
+        .join("CodexAdministrator")
+        .join("instances")
+        .join("missing-key");
+    let output = Command::new(env!("CARGO_BIN_EXE_codex-administrator"))
+        .args([
+            "inject",
+            "--host",
+            "direct",
+            "--model",
+            "grok-4",
+            "--base-url",
+            "https://api.x.ai/v1",
+            "--env-key",
+            "MISSING_GROK_KEY",
+            "--official-path",
+        ])
+        .arg(&official)
+        .arg("--instance-root")
+        .arg(&root)
+        .arg("--daily-profile")
+        .arg(temp.path().join("daily-profile"))
+        .arg("--daily-codex-home")
+        .arg(temp.path().join("daily-codex-home"))
+        .args(["--cdp-port", "9341", "--no-launch"])
+        .env_remove("MISSING_GROK_KEY")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(
+            "required provider credential environment variable MISSING_GROK_KEY is not set"
+        )
+    );
+    assert!(!root.exists());
 }
 
 #[test]
@@ -128,13 +214,45 @@ fn doctor_emits_machine_readable_output_without_credentials() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["product"], "Codex Administrator");
     assert!(value.get("adapters").is_some());
-    assert_eq!(
+    assert_eq!(value["adapters"]["direct"]["implemented"], true);
+    assert!(value["adapters"]["direct"]["available"].is_boolean());
+    assert!(value["adapters"]["direct"].get("enabled").is_none());
+    assert_ne!(
         value["adapters"]["direct"]["reason"],
         "isolated_launcher_not_implemented"
     );
     let rendered = value.to_string().to_ascii_lowercase();
     assert!(!rendered.contains("capability"));
     assert!(!rendered.contains("api_key"));
+}
+
+#[test]
+fn doctor_text_matches_the_machine_readable_direct_status() {
+    let json_output = Command::new(env!("CARGO_BIN_EXE_codex-administrator"))
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    let text_output = Command::new(env!("CARGO_BIN_EXE_codex-administrator"))
+        .arg("doctor")
+        .output()
+        .unwrap();
+
+    assert!(json_output.status.success());
+    assert!(text_output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
+    let available = report["adapters"]["direct"]["available"].as_bool().unwrap();
+    let reason = report["adapters"]["direct"]["reason"].as_str().unwrap();
+    let expected = format!(
+        "Direct: {} ({reason})",
+        if available {
+            "available"
+        } else {
+            "unavailable"
+        }
+    );
+    let rendered = String::from_utf8(text_output.stdout).unwrap();
+
+    assert!(rendered.lines().any(|line| line == expected));
 }
 
 #[test]

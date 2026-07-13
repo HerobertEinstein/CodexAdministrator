@@ -16,10 +16,30 @@ Starting the same isolated profile a second time with `--new-window` creates an
 therefore composes the writable renderer `postMessage` API discovered from the
 same-origin entry bundle instead of replacing the bridge.
 
-The direct adapter remains disabled because the production launcher, process
-ownership monitor, reinjection monitor, and cleanup lifecycle are not yet
-implemented. Calling it returns an error before touching any daily profile,
-process, CDP target, or official file.
+The production Direct adapter is implemented. It:
+
+- accepts only packaged `ChatGPT.exe` under a system `WindowsApps` root and
+  verifies the suspended image plus official package family before resume;
+- derives `profile` and `codex-home` as exact children of one unique
+  `CodexAdministrator/instances/<session>` root;
+- rejects reparse points anywhere in the instance root's existing ancestor
+  chain before creation, configuration writes, or removal;
+- creates each process suspended, assigns it to a Windows Job Object, and then
+  resumes it;
+- launches the background process and isolated window in two stages;
+- requires the loopback listener PID to belong to its Job Object and validates
+  one `app://-/index.html` target on that port;
+- waits separately for bridge health and native UI readiness;
+- installs Ctrl+C handling before any owned path or process is created;
+- checks every pre-existing daily PID during maintenance;
+- tolerates bounded target/health transitions and reinjects after renderer
+  reload while preserving native GPT entries; and
+- terminates only its Job Object and deletes only its owned root on shutdown.
+
+`--no-launch` validates this plan without creating directories or processes.
+It uses the same protected system-`WindowsApps` launchability gate as a real
+launch; a lookalike fixture path is rejected.
+The implementation is not released, merged, or deployed.
 
 ## Codex++
 
@@ -41,6 +61,9 @@ native.
 
 ## Update Behavior
 
-An upstream update changes the executable identity and therefore disables the
-adapter until that release is reviewed. The update itself is never blocked,
-replaced, pinned, or modified.
+For Codex++, an upstream update changes the executable identity and disables
+the adapter until review. Direct uses the protected Windows package location,
+created-process image and package family, listener ownership, and runtime
+target, bridge, UI, and isolation gates; an incompatible update fails one of
+those gates and causes exact cleanup. Neither path blocks, replaces, pins, or
+modifies the publisher update.

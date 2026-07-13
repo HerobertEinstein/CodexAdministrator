@@ -22,7 +22,7 @@
     };
   }
 
-  function appendModels(response, injectedModels) {
+  function appendModels(response, injectedModels, routableModels) {
     if (!response || !Array.isArray(response.data) || !Array.isArray(injectedModels)) return false;
     if (!response.data.every((entry) => entry && typeof entry === "object" && typeof entry.model === "string")) {
       return false;
@@ -31,9 +31,14 @@
     const existing = new Set(response.data.map((entry) => entry.model));
     let changed = false;
     for (const model of injectedModels) {
-      if (!model || typeof model.model !== "string" || existing.has(model.model)) continue;
+      if (!model || typeof model.model !== "string") continue;
+      if (existing.has(model.model)) {
+        routableModels?.delete?.(model.model);
+        continue;
+      }
       response.data.push(cloneModel(model));
       existing.add(model.model);
+      routableModels?.add?.(model.model);
       changed = true;
     }
     return changed;
@@ -128,7 +133,7 @@
     return true;
   }
 
-  function patchModelListMessage(data, pendingRequestIds, injectedModels) {
+  function patchModelListMessage(data, pendingRequestIds, injectedModels, routableModels) {
     if (
       data?.type !== "mcp-response"
       || typeof pendingRequestIds?.has !== "function"
@@ -138,7 +143,7 @@
     const requestId = message?.id == null ? "" : String(message.id);
     if (!pendingRequestIds.has(requestId)) return false;
     pendingRequestIds.delete(requestId);
-    return appendModels(message?.result, injectedModels);
+    return appendModels(message?.result, injectedModels, routableModels);
   }
 
   function learnGrokThreads(data, grokThreadIds, providerId) {

@@ -36,6 +36,11 @@ validated, deduplicated, and appended only to a response belonging to a
 tracked `model/list` request. Existing native entries retain their original
 identity, order, fields, and object references.
 
+The routable Grok set starts empty and is populated only by descriptors
+actually appended to that matched response. Renderer reconfiguration clears it
+back to fail-closed until another response confirms the append. A configured
+ID that collides with a native entry therefore never becomes routable.
+
 The current generated descriptor uses conservative text-only transport
 metadata so the native selector has the required shape. That metadata is not a
 claim that any endpoint or model has passed reasoning or modality E2E.
@@ -72,8 +77,9 @@ The bridge source is host-independent. Adapters only determine how the same
 script reaches the page:
 
 - `direct`: reserved for an isolated official desktop instance and currently
-  disabled until the production launcher enforces separate profile,
-  `CODEX_HOME`, process tree, and loopback CDP ownership;
+  implemented with separate profile, `CODEX_HOME`, suspended-process package
+  verification, Windows Job Object ownership, listener-PID-bound loopback CDP,
+  UI readiness, bounded reload recovery, and exact cleanup;
 - `codexplusplus`: external user script, enabled only for an exact reviewed
   executable identity.
 
@@ -86,14 +92,37 @@ currently used daily ChatGPT/Codex instance. Its launch contract requires:
 
 - a project-owned profile that does not overlap the daily profile;
 - a project-owned `CODEX_HOME` that does not overlap any daily path;
+- an instance path whose existing ancestors contain no reparse point;
 - a new process tree disjoint from every pre-existing ChatGPT PID;
-- a new loopback CDP port with an `app://-/index.html` renderer target; and
+- a new loopback CDP port whose listener PID belongs to that process tree, with
+  one `app://-/index.html` renderer target; and
 - continuous proof that the daily root instance remains alive.
 
 Windows currently needs a two-stage launch for the isolated profile: the first
 start creates its background process and CDP endpoint, and a second start with
 the same isolated arguments plus `--new-window` creates that isolated
-renderer. Failure at any gate leaves direct injection disabled.
+renderer. `CreateProcessW` starts each root process suspended, verifies its
+actual image and `OpenAI.Codex_2p2nqsd0c76g0` package family, assigns it to the
+project Job Object, and only then resumes it. Failure at any security gate
+terminates that Job Object and removes only the exact project-owned instance
+root.
+
+The launcher snapshots every pre-existing ChatGPT PID before startup and
+requires those PIDs to remain alive. It accepts only one
+`app://-/index.html` target from its own loopback port. The CDP client validates
+every command response, waits for bridge health and native UI readiness, and
+reinstalls the same idempotent bootstrap when a renderer reload clears it.
+Missing targets and renderer-health disconnects receive only a bounded recovery
+window; package, PID, listener ownership, and target-identity failures remain
+immediate fail-closed errors.
+
+The launcher proves that it passed the isolated profile argument and the
+current package E2E proves that this release honored it. It does not fabricate a
+runtime profile observation by copying the contract value back into its own
+verification input.
+
+The provider route does not require or launch a separate Grok desktop client or
+execution host.
 
 ## Capability Boundary
 

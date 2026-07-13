@@ -14,7 +14,7 @@
   }
 
   let currentConfig = config;
-  let grokModels = new Set(config.models.map((model) => model.model));
+  let grokModels = new Set();
   const grokThreadIds = new Set();
   const pendingModelListRequests = new Set();
   let activeTransport = null;
@@ -27,6 +27,7 @@
   let rendererDiscoveryPromise = null;
   let discoveredRendererApi = null;
   let mounted = false;
+  const maxBridgeRetryAttempts = 1800;
 
   function stopBridgeRetry() {
     if (bridgeRetryTimer !== null) {
@@ -40,7 +41,7 @@
     bridgeRetryAttempts += 1;
     if (installBridgePatch()) return;
     requestRendererApiDiscovery();
-    if (bridgeRetryAttempts >= 300) stopBridgeRetry();
+    if (bridgeRetryAttempts >= maxBridgeRetryAttempts) stopBridgeRetry();
   }
 
   function requestRendererApiDiscovery() {
@@ -149,7 +150,12 @@
 
   function handleMessage(event) {
     core.learnGrokThreads(event?.data, grokThreadIds, currentConfig.provider_id);
-    core.patchModelListMessage(event?.data, pendingModelListRequests, currentConfig.models);
+    core.patchModelListMessage(
+      event?.data,
+      pendingModelListRequests,
+      currentConfig.models,
+      grokModels,
+    );
   }
 
   function mount() {
@@ -215,7 +221,7 @@
       || !nextConfig.models.every((model) => model && typeof model.model === "string")
     ) return false;
     currentConfig = nextConfig;
-    grokModels = new Set(nextConfig.models.map((model) => model.model));
+    grokModels = new Set();
     pendingModelListRequests.clear();
     return true;
   }
