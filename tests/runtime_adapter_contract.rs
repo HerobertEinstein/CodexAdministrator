@@ -1,6 +1,9 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
-use codex_administrator::{RuntimeKind, RuntimeLaunchSpec, RuntimeProtocol};
+use codex_administrator::{
+    RuntimeKind, RuntimeLaunchSpec, RuntimeProtocol, discover_codex_runtime_in,
+};
+use tempfile::tempdir;
 
 #[test]
 fn grok_uses_the_official_acp_stdio_agent_protocol() {
@@ -35,4 +38,27 @@ fn runtime_specs_reject_non_executable_paths() {
     assert!(
         RuntimeLaunchSpec::validate_executable_path(&PathBuf::from(r"C:\Tools\grok.exe")).is_ok()
     );
+}
+
+#[test]
+fn discovers_official_npm_codex_as_node_plus_javascript_without_a_shell() {
+    let temp = tempdir().unwrap();
+    let node = temp.path().join("node.exe");
+    let script = temp
+        .path()
+        .join("node_modules")
+        .join("@openai")
+        .join("codex")
+        .join("bin")
+        .join("codex.js");
+    fs::create_dir_all(script.parent().unwrap()).unwrap();
+    fs::write(&node, b"fixture").unwrap();
+    fs::write(&script, b"fixture").unwrap();
+
+    let spec = discover_codex_runtime_in([temp.path().to_path_buf()]).unwrap();
+
+    assert_eq!(spec.executable, node);
+    assert_eq!(spec.args[0], script.to_string_lossy());
+    assert_eq!(&spec.args[1..], ["app-server", "--stdio"]);
+    assert!(!spec.use_shell);
 }

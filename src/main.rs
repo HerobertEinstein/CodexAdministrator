@@ -5,8 +5,8 @@ use clap::{Args, Parser, Subcommand};
 use codex_administrator::{
     BootstrapConfig, CompanionContext, CompatibilityDecision, CompatibilityManifest,
     CompatibilityPolicy, HostAdapterKind, HostIdentity, build_companion_router,
-    generate_capability, launch_host_executable, prepare_codex_plus_host_guarded,
-    remove_codex_plus_bootstrap,
+    discover_codex_runtime, generate_capability, launch_host_executable,
+    prepare_codex_plus_host_guarded, remove_codex_plus_bootstrap,
 };
 use directories::BaseDirs;
 use serde::Serialize;
@@ -216,7 +216,7 @@ fn doctor(args: DoctorArgs) -> Result<()> {
         platform: env::consts::OS,
         runtimes: RuntimeReport {
             grok: find_executable("grok.exe"),
-            codex: find_executable("codex.exe"),
+            codex: ProbeResult::from_runtime(discover_codex_runtime()),
         },
         hosts: HostReport {
             codex_plus_plus: find_codex_plus_plus(),
@@ -298,6 +298,7 @@ struct HostReport {
 struct ProbeResult {
     found: bool,
     path: Option<PathBuf>,
+    args: Vec<String>,
 }
 
 impl ProbeResult {
@@ -305,6 +306,22 @@ impl ProbeResult {
         Self {
             found: path.is_some(),
             path,
+            args: Vec::new(),
+        }
+    }
+
+    fn from_runtime(runtime: Option<codex_administrator::RuntimeLaunchSpec>) -> Self {
+        match runtime {
+            Some(runtime) => Self {
+                found: true,
+                path: Some(runtime.executable),
+                args: runtime.args,
+            },
+            None => Self {
+                found: false,
+                path: None,
+                args: Vec::new(),
+            },
         }
     }
 }
@@ -313,6 +330,13 @@ fn display_probe(probe: &ProbeResult) -> String {
     probe
         .path
         .as_deref()
-        .map(|path| path.display().to_string())
+        .map(|path| {
+            let mut display = path.display().to_string();
+            if !probe.args.is_empty() {
+                display.push(' ');
+                display.push_str(&probe.args.join(" "));
+            }
+            display
+        })
         .unwrap_or_else(|| "not found".into())
 }

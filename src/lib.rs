@@ -8,6 +8,7 @@ mod jsonl;
 mod mode;
 pub mod protocol;
 mod runtime;
+mod runtime_client;
 mod runtime_process;
 mod startup;
 
@@ -25,8 +26,9 @@ pub use jsonl::{JsonlEvent, JsonlTransport};
 pub use mode::{AgentMode, ModeState};
 pub use runtime::{
     RuntimeKind, RuntimeLaunchSpec, RuntimeProbe, RuntimeProbeStatus, RuntimeProtocol,
-    probe_runtime_version,
+    discover_codex_runtime, discover_codex_runtime_in, probe_runtime_version,
 };
+pub use runtime_client::{CodexAppServerClient, CodexApprovalDecision, GrokAcpClient};
 pub use runtime_process::RuntimeProcess;
 pub use startup::{
     CodexPlusPreparation, CodexPlusStartupOutcome, generate_capability, prepare_codex_plus_host,

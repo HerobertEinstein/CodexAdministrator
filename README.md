@@ -87,7 +87,13 @@ Codex++ build passes the Windows E2E release gate and is published in
 `compatibility.json`, this command intentionally removes stale project injection,
 reports `native_fallback`, and leaves Codex++ native.
 
-The alpha currently implements the companion, secured injected UI, mode switching, Codex++ bootstrap preparation, compatibility policy, and native runtime launch contracts. Direct ChatGPT activation/CDP ownership and live Grok ACP/Codex app-server turns remain under active development and fail closed rather than claiming support.
+The alpha currently implements the companion, secured injected UI, mode
+switching, fail-closed Codex++ preparation, exact host identity gating, JSONL
+request correlation, Windows Job Object containment, Codex/Grok protocol
+clients, and a real official Codex app-server initialize/thread-start smoke
+test. Direct ChatGPT activation/CDP ownership, real Codex turns and approval UI,
+and authenticated Grok sessions remain under active development and fail closed
+rather than claiming support.
 
 Run the local checks:
 

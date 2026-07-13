@@ -16,15 +16,29 @@ On Windows the Grok process tree must run in a Job Object. Cancellation first se
 
 ## Codex
 
-The primary Codex adapter launches the official Windows executable directly with:
+The adapter resolves the installed official Codex CLI without invoking a shell.
+For a standalone executable it launches:
 
 ```text
 codex.exe app-server --stdio
 ```
 
+For the official npm installation it resolves the wrapper to its owned runtime
+and launches the equivalent command directly:
+
+```text
+node.exe <absolute-path-to-@openai/codex/bin/codex.js> app-server --stdio
+```
+
+It never executes `codex.cmd`, PowerShell wrappers, or the ACL-protected
+`WindowsApps` desktop-package resource as a generic CLI entry.
+
 The transport is the official bidirectional JSONL app-server protocol. The client sends `initialize`, waits for its response, sends `initialized`, and then uses `thread/start` or `thread/resume`, `turn/start`, and `turn/interrupt`.
 
-The companion preserves `thread.id`, `thread.sessionId`, and `turn.id` as distinct identities. Approval requests are answered with the original JSON-RPC request id. The experimental WebSocket transport and Unix-only daemon lifecycle are not used on Windows.
+The companion preserves thread and turn identities separately. Approval requests
+are answered with the original server-request id. Codex app-server messages do
+not add a `jsonrpc` field. The experimental WebSocket transport and Unix-only
+daemon lifecycle are not used on Windows.
 
 `codex exec --json` is a fallback for bounded non-interactive work only. It cannot provide full approval, user-input, or dynamic tool behavior and is not the native parity transport.
 
@@ -35,3 +49,13 @@ The companion preserves `thread.id`, `thread.sessionId`, and `turn.id` as distin
 - Exact executable and protocol versions are part of the compatibility identity.
 - Unknown events are preserved and ignored safely until their capability is understood.
 - Runtime stdout is protocol-only; stderr is diagnostic-only and secrets are redacted.
+- Every Windows runtime is assigned to a Job Object with kill-on-close so the
+  launcher cannot leave a detached process tree after exit.
+
+## Current proof
+
+The repository has deterministic protocol/transport tests for both runtimes and
+a Windows environment-gated Codex test that has completed a real official
+`initialize -> initialized -> thread/start` sequence. Real Codex turns, approval
+UI, resume behavior, authenticated Grok sessions, and Grok permission prompts
+still require their separate E2E gates before parity is claimed.

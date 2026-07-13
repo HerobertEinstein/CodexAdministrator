@@ -1,4 +1,5 @@
 use std::{
+    env,
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -74,6 +75,20 @@ impl RuntimeLaunchSpec {
         }
     }
 
+    pub fn codex_node(executable: PathBuf, script: PathBuf) -> Self {
+        Self {
+            kind: RuntimeKind::Codex,
+            executable,
+            args: vec![
+                script.to_string_lossy().into_owned(),
+                "app-server".into(),
+                "--stdio".into(),
+            ],
+            protocol: RuntimeProtocol::CodexAppServerJsonLines,
+            use_shell: false,
+        }
+    }
+
     pub fn validate_executable_path(path: &Path) -> Result<()> {
         if !path.is_absolute() {
             bail!("runtime executable path must be absolute");
@@ -87,6 +102,43 @@ impl RuntimeLaunchSpec {
         }
         Ok(())
     }
+}
+
+pub fn discover_codex_runtime() -> Option<RuntimeLaunchSpec> {
+    let directories = env::var_os("PATH")
+        .into_iter()
+        .flat_map(|paths| env::split_paths(&paths).collect::<Vec<_>>());
+    discover_codex_runtime_in(directories)
+}
+
+pub fn discover_codex_runtime_in<I>(directories: I) -> Option<RuntimeLaunchSpec>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    let directories = directories.into_iter().collect::<Vec<_>>();
+    for directory in &directories {
+        let node = directory.join("node.exe");
+        let script = directory
+            .join("node_modules")
+            .join("@openai")
+            .join("codex")
+            .join("bin")
+            .join("codex.js");
+        if node.is_file() && script.is_file() {
+            return Some(RuntimeLaunchSpec::codex_node(node, script));
+        }
+    }
+    directories
+        .into_iter()
+        .map(|directory| directory.join("codex.exe"))
+        .find(|candidate| {
+            candidate.is_file()
+                && !candidate
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .contains("\\windowsapps\\")
+        })
+        .map(RuntimeLaunchSpec::codex)
 }
 
 pub async fn probe_runtime_version(
