@@ -4,8 +4,11 @@ mod bootstrap;
 mod companion;
 mod compatibility;
 mod host;
+mod jsonl;
 mod mode;
+pub mod protocol;
 mod runtime;
+mod runtime_process;
 mod startup;
 
 pub use bootstrap::{BootstrapConfig, render_bootstrap};
@@ -18,11 +21,13 @@ pub use host::{
     codex_plus_bootstrap_path, enable_codex_plus_bootstrap, install_bootstrap_atomically,
     launch_host_executable, remove_codex_plus_bootstrap,
 };
+pub use jsonl::{JsonlEvent, JsonlTransport};
 pub use mode::{AgentMode, ModeState};
 pub use runtime::{
     RuntimeKind, RuntimeLaunchSpec, RuntimeProbe, RuntimeProbeStatus, RuntimeProtocol,
     probe_runtime_version,
 };
+pub use runtime_process::RuntimeProcess;
 pub use startup::{
     CodexPlusPreparation, CodexPlusStartupOutcome, generate_capability, prepare_codex_plus_host,
     prepare_codex_plus_host_guarded,
