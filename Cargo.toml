@@ -3,7 +3,7 @@ name = "codex-administrator"
 version = "0.1.0-alpha.1"
 edition = "2024"
 rust-version = "1.85"
-description = "Windows launcher and dual-main-agent UI companion for official ChatGPT/Codex, Grok Build, and Codex CLI"
+description = "External Grok model-list injection for native ChatGPT/Codex hosts"
 license = "Apache-2.0"
 repository = "https://github.com/HerobertEinstein/CodexAdministrator"
 readme = "README.md"
@@ -12,21 +12,16 @@ categories = ["development-tools"]
 
 [dependencies]
 anyhow = "1.0"
-axum = "0.8"
-axum-extra = { version = "0.10", features = ["typed-header"] }
 clap = { version = "4.5", features = ["derive"] }
 directories = "6.0"
-rand = "0.9"
+http = "1.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
-subtle = "2.6"
 toml_edit = "0.23"
-tokio = { version = "1.47", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync"] }
 
 [dev-dependencies]
 tempfile = "3.20"
-tower = { version = "0.5", features = ["util"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

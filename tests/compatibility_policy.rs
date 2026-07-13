@@ -1,7 +1,7 @@
 use std::fs;
 
 use codex_administrator::{
-    AgentMode, CompatibilityDecision, CompatibilityManifest, CompatibilityPolicy, HostAdapterKind,
+    CompatibilityDecision, CompatibilityManifest, CompatibilityPolicy, HostAdapterKind,
     HostIdentity,
 };
 use tempfile::tempdir;
@@ -16,60 +16,28 @@ fn policy() -> CompatibilityPolicy {
 
 #[test]
 fn verified_host_versions_may_enable_the_requested_model_selection_bridge() {
-    let decision = policy().evaluate(
-        HostAdapterKind::CodexPlusPlus,
-        Some(&"b".repeat(64)),
-        AgentMode::GrokNativeModel,
-    );
+    let decision = policy().evaluate(HostAdapterKind::CodexPlusPlus, Some(&"b".repeat(64)));
 
-    assert_eq!(
-        decision,
-        CompatibilityDecision::Enabled(AgentMode::GrokNativeModel)
-    );
+    assert_eq!(decision, CompatibilityDecision::Enabled);
 }
 
 #[test]
 fn unknown_host_versions_fail_closed_to_native_gpt() {
-    let decision = policy().evaluate(
-        HostAdapterKind::CodexPlusPlus,
-        Some(&"c".repeat(64)),
-        AgentMode::GrokNativeModel,
-    );
+    let decision = policy().evaluate(HostAdapterKind::CodexPlusPlus, Some(&"c".repeat(64)));
 
     assert_eq!(
         decision,
         CompatibilityDecision::NativeOnly {
-            requested: AgentMode::GrokNativeModel,
             reason: "unverified_host_identity".into(),
         }
     );
-    assert_eq!(decision.effective_mode(), AgentMode::NativeGptMain);
 }
 
 #[test]
 fn missing_version_evidence_never_enables_injection() {
-    let decision = policy().evaluate(HostAdapterKind::Direct, None, AgentMode::GrokNativeModel);
+    let decision = policy().evaluate(HostAdapterKind::Direct, None);
 
-    assert_eq!(decision.effective_mode(), AgentMode::NativeGptMain);
     assert!(!decision.injection_enabled());
-}
-
-#[test]
-fn native_gpt_remains_available_even_on_an_unverified_host() {
-    let decision = policy().evaluate(
-        HostAdapterKind::Direct,
-        Some(&"f".repeat(64)),
-        AgentMode::NativeGptMain,
-    );
-
-    assert_eq!(decision.effective_mode(), AgentMode::NativeGptMain);
-    assert_eq!(
-        decision,
-        CompatibilityDecision::NativeOnly {
-            requested: AgentMode::NativeGptMain,
-            reason: "unverified_host_identity".into(),
-        }
-    );
 }
 
 #[test]
@@ -102,7 +70,7 @@ fn host_identity_is_derived_from_the_executable_contents() {
 fn compatibility_manifest_accepts_only_exact_binary_identities() {
     let manifest = CompatibilityManifest::from_json(
         format!(
-            r#"{{"schema_version":1,"hosts":[{{"adapter":"codexplusplus","sha256":"{}","project_version":"{}","bootstrap_version":1,"evidence_sha256":"{}"}}]}}"#,
+            r#"{{"schema_version":1,"hosts":[{{"adapter":"codexplusplus","sha256":"{}","project_version":"{}","bootstrap_version":2,"evidence_sha256":"{}"}}]}}"#,
             "d".repeat(64),
             env!("CARGO_PKG_VERSION"),
             "e".repeat(64),
@@ -114,20 +82,12 @@ fn compatibility_manifest_accepts_only_exact_binary_identities() {
 
     assert!(
         policy
-            .evaluate(
-                HostAdapterKind::CodexPlusPlus,
-                Some(&"d".repeat(64)),
-                AgentMode::GrokNativeModel,
-            )
+            .evaluate(HostAdapterKind::CodexPlusPlus, Some(&"d".repeat(64)),)
             .injection_enabled()
     );
     assert!(
         !policy
-            .evaluate(
-                HostAdapterKind::CodexPlusPlus,
-                Some(&"e".repeat(64)),
-                AgentMode::GrokNativeModel,
-            )
+            .evaluate(HostAdapterKind::CodexPlusPlus, Some(&"e".repeat(64)),)
             .injection_enabled()
     );
 }
@@ -137,7 +97,7 @@ fn compatibility_manifest_rejects_malformed_or_future_schema_data() {
     assert!(CompatibilityManifest::from_json(br#"{"schema_version":2,"hosts":[]}"#).is_err());
     assert!(CompatibilityManifest::from_json(
         format!(
-            r#"{{"schema_version":1,"hosts":[{{"adapter":"direct","sha256":"{}","project_version":"{}","bootstrap_version":1}}]}}"#,
+            r#"{{"schema_version":1,"hosts":[{{"adapter":"direct","sha256":"{}","project_version":"{}","bootstrap_version":2}}]}}"#,
             "a".repeat(64),
             env!("CARGO_PKG_VERSION"),
         )
@@ -146,7 +106,7 @@ fn compatibility_manifest_rejects_malformed_or_future_schema_data() {
     .is_err());
     assert!(CompatibilityManifest::from_json(
         format!(
-            r#"{{"schema_version":1,"hosts":[{{"adapter":"direct","sha256":"{}","project_version":"old-release","bootstrap_version":1,"evidence_sha256":"{}"}}]}}"#,
+            r#"{{"schema_version":1,"hosts":[{{"adapter":"direct","sha256":"{}","project_version":"old-release","bootstrap_version":2,"evidence_sha256":"{}"}}]}}"#,
             "a".repeat(64),
             "b".repeat(64),
         )

@@ -1,33 +1,22 @@
 use std::fs;
 
 use codex_administrator::{
-    AgentMode, BootstrapConfig, CODEX_PLUS_BOOTSTRAP_KEY, CompatibilityPolicy, HostAdapterKind,
-    HostIdentity, generate_capability, prepare_codex_plus_host, prepare_codex_plus_host_guarded,
+    BootstrapConfig, CODEX_PLUS_BOOTSTRAP_KEY, CompatibilityPolicy, HostAdapterKind, HostIdentity,
+    InjectedModelDescriptor, prepare_codex_plus_host, prepare_codex_plus_host_guarded,
 };
 use tempfile::tempdir;
 
-#[test]
-fn generated_launch_capabilities_are_unique_256_bit_hex_values() {
-    let first = generate_capability();
-    let second = generate_capability();
-
-    assert_eq!(first.len(), 64);
-    assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
-    assert_ne!(first, second);
+fn bootstrap_config() -> BootstrapConfig {
+    BootstrapConfig {
+        models: vec![InjectedModelDescriptor::grok("grok-4")],
+    }
 }
 
 #[test]
 fn prepares_the_optional_codex_plus_host_without_touching_its_binaries() {
     let temp = tempdir().unwrap();
     let appdata = temp.path().join("AppData").join("Roaming");
-    let receipt = prepare_codex_plus_host(
-        &appdata,
-        &BootstrapConfig {
-            port: 49_321,
-            capability: "0123456789abcdef0123456789abcdef".into(),
-        },
-    )
-    .unwrap();
+    let receipt = prepare_codex_plus_host(&appdata, &bootstrap_config()).unwrap();
 
     assert_eq!(
         receipt.bootstrap_path,
@@ -39,7 +28,9 @@ fn prepares_the_optional_codex_plus_host_without_touching_its_binaries() {
     assert_eq!(receipt.sha256.len(), 64);
     let script = fs::read_to_string(&receipt.bootstrap_path).unwrap();
     assert!(script.contains("window.__codexAdministrator"));
-    assert!(script.contains("49321"));
+    assert!(script.contains("grok-4"));
+    assert!(script.contains("grok_native"));
+    assert!(!script.contains("capability"));
 
     let config: serde_json::Value = serde_json::from_slice(
         &fs::read(appdata.join("Codex++").join("user_scripts.json")).unwrap(),
@@ -60,10 +51,7 @@ fn guarded_startup_prepares_injection_only_for_an_exact_approved_identity() {
 
     let outcome = prepare_codex_plus_host_guarded(
         &appdata,
-        &BootstrapConfig {
-            port: 49_321,
-            capability: "0123456789abcdef0123456789abcdef".into(),
-        },
+        &bootstrap_config(),
         Some(&HostIdentity {
             adapter: HostAdapterKind::CodexPlusPlus,
             sha256,
@@ -71,10 +59,7 @@ fn guarded_startup_prepares_injection_only_for_an_exact_approved_identity() {
         &policy,
     );
 
-    assert_eq!(
-        outcome.decision.effective_mode(),
-        AgentMode::GrokNativeModel
-    );
+    assert!(outcome.decision.injection_enabled());
     assert!(outcome.bootstrap.is_some());
     assert!(outcome.isolation_error.is_none());
 }
@@ -98,10 +83,7 @@ fn guarded_startup_removes_stale_injection_for_an_updated_unknown_host() {
 
     let outcome = prepare_codex_plus_host_guarded(
         &appdata,
-        &BootstrapConfig {
-            port: 49_321,
-            capability: "0123456789abcdef0123456789abcdef".into(),
-        },
+        &bootstrap_config(),
         Some(&HostIdentity {
             adapter: HostAdapterKind::CodexPlusPlus,
             sha256: "f".repeat(64),
@@ -109,7 +91,7 @@ fn guarded_startup_removes_stale_injection_for_an_updated_unknown_host() {
         &CompatibilityPolicy::default(),
     );
 
-    assert_eq!(outcome.decision.effective_mode(), AgentMode::NativeGptMain);
+    assert!(!outcome.decision.injection_enabled());
     assert!(outcome.bootstrap.is_none());
     assert!(!scripts.join("codex-administrator-bootstrap.js").exists());
     let config: serde_json::Value =
@@ -132,10 +114,7 @@ fn guarded_startup_fails_closed_when_bootstrap_preparation_fails() {
 
     let outcome = prepare_codex_plus_host_guarded(
         &appdata,
-        &BootstrapConfig {
-            port: 49_321,
-            capability: "0123456789abcdef0123456789abcdef".into(),
-        },
+        &bootstrap_config(),
         Some(&HostIdentity {
             adapter: HostAdapterKind::CodexPlusPlus,
             sha256,
@@ -143,7 +122,7 @@ fn guarded_startup_fails_closed_when_bootstrap_preparation_fails() {
         &policy,
     );
 
-    assert_eq!(outcome.decision.effective_mode(), AgentMode::NativeGptMain);
+    assert!(!outcome.decision.injection_enabled());
     assert!(outcome.bootstrap.is_none());
     assert!(outcome.isolation_error.is_some());
     assert!(

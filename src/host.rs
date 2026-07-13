@@ -2,16 +2,18 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 pub const CODEX_PLUS_BOOTSTRAP_KEY: &str = "user:codex-administrator-bootstrap.js";
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CodexPlusRemovalReceipt {
@@ -153,12 +155,19 @@ pub fn remove_codex_plus_bootstrap(appdata: &Path) -> Result<CodexPlusRemovalRec
 }
 
 fn unique_temp_path(path: &Path) -> PathBuf {
-    let suffix: u64 = rand::rng().random();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let name = path
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("bootstrap");
-    path.with_file_name(format!(".{name}.{suffix:016x}.tmp"))
+    path.with_file_name(format!(
+        ".{name}.{:x}.{timestamp:x}.{counter:x}.tmp",
+        std::process::id()
+    ))
 }
 
 #[cfg(windows)]

@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{AgentMode, HostAdapterKind};
+use crate::HostAdapterKind;
 
 #[derive(Debug, Clone, Default)]
 pub struct CompatibilityPolicy {
@@ -30,7 +30,6 @@ impl CompatibilityPolicy {
         &self,
         adapter: HostAdapterKind,
         sha256: Option<&str>,
-        requested: AgentMode,
     ) -> CompatibilityDecision {
         let verified = sha256
             .and_then(|value| normalize_sha256(value).ok())
@@ -40,10 +39,9 @@ impl CompatibilityPolicy {
                     .is_some_and(|hashes| hashes.contains(&sha256))
             });
         if verified {
-            CompatibilityDecision::Enabled(requested)
+            CompatibilityDecision::Enabled
         } else {
             CompatibilityDecision::NativeOnly {
-                requested,
                 reason: "unverified_host_identity".into(),
             }
         }
@@ -140,7 +138,7 @@ impl CompatibilityManifest {
                         env!("CARGO_PKG_VERSION")
                     );
                 }
-                if host.bootstrap_version != 1 {
+                if host.bootstrap_version != 2 {
                     bail!(
                         "compatibility entry targets unsupported bootstrap version {}",
                         host.bootstrap_version
@@ -163,22 +161,12 @@ fn normalize_sha256(value: &str) -> Result<String> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompatibilityDecision {
-    Enabled(AgentMode),
-    NativeOnly {
-        requested: AgentMode,
-        reason: String,
-    },
+    Enabled,
+    NativeOnly { reason: String },
 }
 
 impl CompatibilityDecision {
-    pub const fn effective_mode(&self) -> AgentMode {
-        match self {
-            Self::Enabled(mode) => *mode,
-            Self::NativeOnly { .. } => AgentMode::NativeGptMain,
-        }
-    }
-
     pub const fn injection_enabled(&self) -> bool {
-        matches!(self, Self::Enabled(AgentMode::GrokNativeModel))
+        matches!(self, Self::Enabled)
     }
 }

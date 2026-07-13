@@ -1,145 +1,113 @@
 # Codex Administrator
 
-Codex Administrator is an open-source Windows launcher for using Grok models
-through the official ChatGPT/Codex agent host without installing or trusting a
-separate Grok client.
+Codex Administrator is an experimental Windows launcher component that adds
+Grok entries to the native ChatGPT/Codex model list. It keeps the official
+interface, GPT entries, agent loop, tools, approvals, sandbox, workspace, and
+task storage under the original host's control.
 
-The official Codex host keeps ownership of the agent loop, tools, approvals,
-sandbox, workspace, sessions, compaction, and user interface. Grok is only a
-Responses-compatible model provider.
+## Exact Scope
 
-## Architecture
+The project has two narrowly separated responsibilities:
+
+1. Register `[model_providers.grok_native]` in the supported user-owned Codex
+   configuration without changing `model`, `model_provider`, or any native GPT
+   entry.
+2. Append configured Grok descriptors to a native `model/list` response and add
+   `modelProvider: "grok_native"` only when a Grok model starts a new task or a
+   previously identified Grok task is resumed.
+
+It does not create another interface or replace the host's execution loop.
+Selecting GPT preserves the original request object and behavior.
 
 ```text
 Codex Administrator
-  -> atomically registers [model_providers.grok_native]
-  -> selects model_provider = "grok_native" and the requested Grok model
-  -> preserves the previous native model/provider/catalog selection
-  -> stores an environment-variable name, never the API key
-  -> launches the official `codex app <workspace>`
-       -> native Codex tools, approvals, sandbox, workspace, and sessions
+  +-- configure-provider
+  |     `-- writes only [model_providers.grok_native]
+  `-- inject
+        +-- appends Grok to model/list
+        `-- routes Grok thread/start and known Grok thread/resume
+
+Official ChatGPT/Codex host
+  `-- keeps UI, GPT models, tools, approvals, sandbox, workspace, and tasks
 ```
 
-The primary launch path does not patch ChatGPT/Codex, replace `app.asar`, inject
-a Grok chat workspace, run Grok CLI/Grok Build, or add an independent Grok tool
-and permission loop. Official application and Codex++ installers, binaries,
-profiles, and updaters remain publisher-owned.
+## Current Status
 
-An optional Codex++ compatibility bridge remains fail-closed behind exact
-executable SHA-256 evidence. Its iframe is hidden and cannot replace or cover
-the official interface. The shipped alpha manifest contains no accepted host
-identity, so unknown Codex++ builds remain completely native.
+This repository is alpha software and does not yet claim end-to-end Grok
+support in the official desktop application.
 
-## Native Launch
+- Provider registration is implemented and covered by configuration tests.
+- The model-list and per-task routing bridge is covered by message-level tests.
+- Direct injection into the official desktop application is disabled until a
+  real desktop E2E run proves startup, model visibility, selection, disposal,
+  and native GPT preservation.
+- The Codex++ adapter writes only an external user script. The shipped
+  compatibility manifest is empty, so unverified releases remain native and
+  any stale project script is removed.
+- Model visibility does not prove text streaming, tools, files, images,
+  structured output, cancellation, resume reliability, or feature parity.
 
-Requirements:
+## Provider Configuration
 
-- Windows 10 or later
-- Rust 1.85 or later for source builds
-- Official Codex CLI/Desktop installation
-- A Grok endpoint that implements the Responses wire API at a `/v1` base URL
-- A credential already available to the official ChatGPT/Codex process through
-  the named environment variable
-
-Provision the environment variable before starting ChatGPT/Codex. Fully exit
-and reopen the official app after changing the Windows user environment so its
-backend receives the new value. Then launch Grok:
+Set the credential in an environment variable inherited by ChatGPT/Codex, then
+register the provider:
 
 ```powershell
-cargo run -- launch `
-  --base-url "https://trusted-grok-endpoint.example/v1" `
-  --env-key "XAI_API_KEY" `
-  --model "grok-4" `
-  --model-catalog "D:\Path\To\reviewed-grok-models.json" `
-  --workspace "D:\VSC\work"
+$env:XAI_API_KEY = "your-key"
+
+cargo run -- configure-provider `
+  --base-url "https://api.x.ai/v1" `
+  --env-key "XAI_API_KEY"
 ```
 
-The launcher writes only the environment-variable name to Codex configuration.
-It never accepts an `--api-key` argument and never prints or persists the
-credential value. Remote endpoints require HTTPS; HTTP is accepted only for
-`127.0.0.1`, `localhost`, or `::1` development endpoints.
+The command accepts the environment-variable name only. It never accepts,
+prints, or stores the key value. Remote URLs require HTTPS and must end in
+`/v1`; loopback HTTP is accepted for tests.
 
-Codex CLI 0.142.3 accepts root `-c` flags next to `codex app`, but its official
-Windows `app` implementation does not forward those overrides to the desktop
-process. The launcher therefore writes the supported user configuration
-atomically and invokes only the real official desktop-open command:
+## Model-List Injection
+
+The direct adapter currently fails closed:
 
 ```powershell
-codex app "D:\VSC\work"
+cargo run -- inject --host direct --model grok-4
 ```
 
-`--model-catalog` is optional for experimental fallback metadata, but required
-before the project describes a Grok model as having reviewed model-list,
-context, reasoning, tool, or modality metadata. The catalog is passed through
-Codex's official persisted `model_catalog_json` surface, must use the current
-official model-entry schema, and must contain the selected exact model slug.
-Because that setting replaces the bundled catalog for the process, an existing
-catalog is never silently replaced without an explicit `--model-catalog`.
-Before launch, the installed official Codex runtime must also accept the file
-through `codex debug models`.
-
-Return to the exact model/provider/catalog selection that existed before Grok:
+For a separately installed and explicitly verified Codex++ release:
 
 ```powershell
-cargo run -- launch-native --workspace "D:\VSC\work"
+cargo run -- inject `
+  --host codexplusplus `
+  --model grok-4 `
+  --codex-plus-path "C:\Path\To\codex-plus-plus.exe"
 ```
 
-Restoration is fail-closed. If the user changed those fields after Grok was
-selected, the launcher refuses to overwrite the newer choice.
+An exact executable SHA-256 and matching E2E evidence must be present in
+`compatibility.json`. Unknown releases are launched without this project's
+script when `--no-launch` is omitted.
 
-## Capability Boundary
+## Update Isolation
 
-A visible model or successful text response is not proof of complete native
-support. Responses streaming, tool calls, parallel tool calls, structured
-outputs, image input, file input, reasoning summaries, cancellation, and error
-behavior require capability-specific E2E evidence through the official Codex
-host. Unknown capabilities default to disabled in the project capability
-contract.
+Codex Administrator never edits official installation directories, packaged
+resources, executables, signatures, profiles, updater services, update
+settings, or update channels. Project-owned writes are limited to:
 
-ChatGPT service-only tools and entitlements cannot be promised for a custom
-provider. The project targets parity with the native local Codex agent
-environment, and publishes a capability only after that exact model/endpoint
-combination passes the relevant tests.
+- the exact `model_providers.grok_native` entry in user configuration; and
+- the exact Codex++ external user-script file and enablement key when that
+  adapter passes its compatibility gate.
 
-## Non-goals
-
-- Modifying official ChatGPT/Codex or Codex++ installation files or updaters.
-- Restoring Grok CLI, Grok Build, ACP, or a Grok-owned main-agent runtime.
-- Showing a custom Grok chat UI over the official client.
-- Persisting API keys in source, config, launch arguments, logs, or evidence.
-- Claiming model, tool, streaming, or multimodal parity from model discovery.
-- Bundling proprietary OpenAI, xAI, or Codex++ binaries.
+Official updates may require renewed compatibility evidence, but they remain
+fully owned and installed by their publishers.
 
 ## Development
-
-Inspect the local environment without printing credentials:
-
-```powershell
-cargo run -- doctor --json
-```
-
-Run the verification suite:
 
 ```powershell
 cargo fmt --check
 cargo test --all-targets
-node --test tests/ui_assets.test.mjs
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test --test codex_live -- --ignored --nocapture --test-threads=1
+node --test tests/*.test.mjs
 ```
 
-See [ARCHITECTURE.md](docs/ARCHITECTURE.md),
-[COMPATIBILITY.md](docs/COMPATIBILITY.md),
-[UPDATE_ISOLATION.md](docs/UPDATE_ISOLATION.md), and
-[RUNTIME_ADAPTERS.md](docs/RUNTIME_ADAPTERS.md) before changing provider,
-launcher, host-compatibility, update, or removal behavior.
-
-## Independence
-
-Codex Administrator is an independent community project. It is not affiliated
-with, endorsed by, or sponsored by OpenAI, xAI, X Corp., or Codex++. Product
-names and trademarks belong to their respective owners.
-
-## License
-
-Apache-2.0. See [LICENSE](LICENSE).
+See [Architecture](docs/ARCHITECTURE.md),
+[Compatibility](docs/COMPATIBILITY.md),
+[Host adapters](docs/HOST_ADAPTERS.md), and
+[Update isolation](docs/UPDATE_ISOLATION.md).

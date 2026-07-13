@@ -1,21 +1,23 @@
 # Security Policy
 
-## Supported versions
+## Supported Versions
 
-No production version has been released yet. Security reports for the current main branch are welcome.
+No production version has been released. Security reports for the current
+default branch are welcome.
 
 ## Reporting
 
-Do not open a public issue for a vulnerability that could expose credentials, execute commands, or cross the loopback trust boundary. Use GitHub private vulnerability reporting once the public repository is available.
+Use GitHub private vulnerability reporting for issues that could expose a
+credential, alter another provider, execute code outside the declared host
+adapter, or modify an official installation.
 
-## Trust boundary
+## Trust Boundary
 
-- Companion services bind to loopback only.
-- Every launch uses a new capability value.
-- Control capabilities are never written to logs or browser storage.
-- The injected bootstrap is digest-verified and contains no reusable account credential.
-- Official Grok and Codex credential stores remain runtime-owned.
-- The project never modifies official application installation files.
-- Exactly one selected host adapter owns injection for a ChatGPT/Codex instance.
-- The optional Codex++ adapter uses an installed external release; no Codex++ source is copied into this project.
-- Concurrent writers require separate worktrees or an explicit lease transfer.
+- Credential values remain in user-managed environment variables.
+- Provider configuration stores only the environment-variable name.
+- Generated scripts contain model metadata and routing logic only.
+- Official installation and updater files are never modified.
+- GPT messages and native model entries are preserved unchanged.
+- Codex++ injection requires an exact reviewed executable identity.
+- Unknown host versions fail closed and remove only stale project-owned data.
+- The project does not claim unverified model capabilities.

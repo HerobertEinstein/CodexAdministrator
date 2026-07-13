@@ -1,12 +1,11 @@
-use std::{fmt::Write, path::Path};
+use std::path::Path;
 
 use anyhow::Result;
-use rand::RngCore;
 
 use crate::{
-    AgentMode, BootstrapConfig, CompatibilityDecision, CompatibilityPolicy, HostAdapterKind,
-    HostIdentity, codex_plus_bootstrap_path, enable_codex_plus_bootstrap,
-    install_bootstrap_atomically, remove_codex_plus_bootstrap, render_bootstrap,
+    BootstrapConfig, CompatibilityDecision, CompatibilityPolicy, HostAdapterKind, HostIdentity,
+    codex_plus_bootstrap_path, enable_codex_plus_bootstrap, install_bootstrap_atomically,
+    remove_codex_plus_bootstrap, render_bootstrap,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,16 +19,6 @@ pub struct CodexPlusStartupOutcome {
     pub decision: CompatibilityDecision,
     pub bootstrap: Option<CodexPlusPreparation>,
     pub isolation_error: Option<String>,
-}
-
-pub fn generate_capability() -> String {
-    let mut bytes = [0_u8; 32];
-    rand::rng().fill_bytes(&mut bytes);
-    let mut capability = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        write!(&mut capability, "{byte:02x}").expect("writing to a String cannot fail");
-    }
-    capability
 }
 
 pub fn prepare_codex_plus_host(
@@ -55,11 +44,7 @@ pub fn prepare_codex_plus_host_guarded(
     let identity_sha256 = identity
         .filter(|identity| identity.adapter == HostAdapterKind::CodexPlusPlus)
         .map(|identity| identity.sha256.as_str());
-    let decision = policy.evaluate(
-        HostAdapterKind::CodexPlusPlus,
-        identity_sha256,
-        AgentMode::GrokNativeModel,
-    );
+    let decision = policy.evaluate(HostAdapterKind::CodexPlusPlus, identity_sha256);
 
     if decision.injection_enabled() {
         match prepare_codex_plus_host(appdata, bootstrap_config) {
@@ -82,7 +67,6 @@ pub fn prepare_codex_plus_host_guarded(
                 };
                 return CodexPlusStartupOutcome {
                     decision: CompatibilityDecision::NativeOnly {
-                        requested: AgentMode::GrokNativeModel,
                         reason: "bootstrap_prepare_failed".into(),
                     },
                     bootstrap: None,

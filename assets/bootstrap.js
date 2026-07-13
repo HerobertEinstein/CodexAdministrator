@@ -2,11 +2,8 @@
   "use strict";
 
   const config = /*__CODEX_ADMINISTRATOR_CONFIG__*/;
-  const rootId = "codex-administrator-root";
-  const modes = Object.freeze({
-    grok: "grok_native_model",
-    gpt: "native_gpt_main",
-  });
+  const core = globalThis.__codexAdministratorModelInjectionCore;
+  if (!core) return;
 
   const prior = window.__codexAdministrator;
   if (prior && typeof prior.configure === "function") {
@@ -16,111 +13,123 @@
   }
 
   let currentConfig = config;
-  let currentMode = modes.gpt;
-  let root = null;
-  let frame = null;
-  let frameLoaded = false;
-  let bridgeAvailable = false;
+  let grokModels = new Set(config.models.map((model) => model.model));
+  const grokThreadIds = new Set();
+  const pendingModelListRequests = new Set();
+  let activeBridge = null;
+  let originalSendMessageFromView = null;
+  let patchedSendMessageFromView = null;
   let messageListenerInstalled = false;
+  let bridgeRetryTimer = null;
+  let bridgeRetryAttempts = 0;
 
-  function createBridge() {
-    frame = document.createElement("iframe");
-    frame.title = "Provider authentication bridge";
-    frame.hidden = true;
-    frame.tabIndex = -1;
-    frame.referrerPolicy = "no-referrer";
-    frame.src = `${currentConfig.base_url}/ui/#capability=${encodeURIComponent(currentConfig.capability)}`;
-    frame.addEventListener("load", () => {
-      frameLoaded = true;
-      sendToFrame({ type: "codex-administrator:state-request" });
-    });
-    root.appendChild(frame);
-  }
-
-  function buildRoot() {
-    root = document.createElement("div");
-    root.id = rootId;
-    root.hidden = true;
-    root.setAttribute("aria-hidden", "true");
-    document.body.appendChild(root);
-    createBridge();
-  }
-
-  function sendToFrame(message) {
-    if (!frameLoaded || !frame?.contentWindow) return false;
-    frame.contentWindow.postMessage(message, currentConfig.base_url);
-    return true;
-  }
-
-  function applyState(state) {
-    if (state?.unavailable || (state?.mode !== modes.grok && state?.mode !== modes.gpt)) {
-      bridgeAvailable = false;
-      currentMode = modes.gpt;
-    } else {
-      bridgeAvailable = true;
-      currentMode = state.mode;
+  function stopBridgeRetry() {
+    if (bridgeRetryTimer !== null) {
+      clearInterval(bridgeRetryTimer);
+      bridgeRetryTimer = null;
     }
+    bridgeRetryAttempts = 0;
+  }
+
+  function retryBridgePatch() {
+    bridgeRetryAttempts += 1;
+    if (installBridgePatch()) return;
+    if (bridgeRetryAttempts >= 300) stopBridgeRetry();
+  }
+
+  function installBridgePatch() {
+    const bridge = window.electronBridge;
+    if (!bridge || typeof bridge.sendMessageFromView !== "function") return false;
+    if (activeBridge === bridge && bridge.sendMessageFromView === patchedSendMessageFromView) {
+      return true;
+    }
+    restoreBridgePatch();
+    activeBridge = bridge;
+    originalSendMessageFromView = bridge.sendMessageFromView;
+    patchedSendMessageFromView = function codexAdministratorSendMessageFromView(message) {
+      core.trackModelListRequest(message, pendingModelListRequests);
+      const routed = core.routeProvider(
+        message,
+        grokModels,
+        currentConfig.provider_id,
+        grokThreadIds,
+      );
+      return originalSendMessageFromView.call(bridge, routed);
+    };
+    bridge.sendMessageFromView = patchedSendMessageFromView;
+    const installed = bridge.sendMessageFromView === patchedSendMessageFromView;
+    if (installed) stopBridgeRetry();
+    return installed;
+  }
+
+  function restoreBridgePatch() {
+    if (
+      activeBridge
+      && originalSendMessageFromView
+      && activeBridge.sendMessageFromView === patchedSendMessageFromView
+    ) {
+      activeBridge.sendMessageFromView = originalSendMessageFromView;
+    }
+    activeBridge = null;
+    originalSendMessageFromView = null;
+    patchedSendMessageFromView = null;
   }
 
   function handleMessage(event) {
-    if (!frame?.contentWindow || event.source !== frame.contentWindow) return;
-    if (event.origin !== currentConfig.base_url) return;
-    if (event.data?.type !== "codex-administrator:state") return;
-    applyState(event.data.state);
-  }
-
-  function hydrate() {
-    if (!sendToFrame({ type: "codex-administrator:state-request" })) {
-      applyState({ mode: modes.gpt, unavailable: true });
-    }
+    core.learnGrokThreads(event?.data, grokThreadIds, currentConfig.provider_id);
+    core.patchModelListMessage(event?.data, pendingModelListRequests, currentConfig.models);
   }
 
   function mount() {
-    if (!document.body) {
-      document.addEventListener("DOMContentLoaded", mount, { once: true });
-      return false;
-    }
     if (!messageListenerInstalled) {
-      window.addEventListener("message", handleMessage);
+      window.addEventListener("message", handleMessage, true);
       messageListenerInstalled = true;
     }
-    root = document.getElementById(rootId);
-    if (!root) buildRoot();
-    if (frameLoaded) hydrate();
-    return true;
+    if (installBridgePatch()) return true;
+    if (bridgeRetryTimer === null) {
+      bridgeRetryAttempts = 0;
+      bridgeRetryTimer = setInterval(retryBridgePatch, 100);
+    }
+    return false;
   }
 
   function dispose() {
+    stopBridgeRetry();
+    restoreBridgePatch();
     if (messageListenerInstalled) {
-      window.removeEventListener("message", handleMessage);
+      window.removeEventListener("message", handleMessage, true);
       messageListenerInstalled = false;
     }
-    frameLoaded = false;
-    bridgeAvailable = false;
-    frame = null;
-    root?.remove();
-    root = null;
+    pendingModelListRequests.clear();
+    grokThreadIds.clear();
     return true;
   }
 
   function health() {
     return {
-      ok: Boolean(root && document.documentElement.contains(root)),
-      bridge_available: bridgeAvailable,
-      mode: currentMode,
+      ok: Boolean(
+        messageListenerInstalled
+        && activeBridge
+        && activeBridge.sendMessageFromView === patchedSendMessageFromView
+      ),
+      provider: currentConfig.provider_id,
+      models: currentConfig.models.map((model) => model.model),
+      grok_threads: grokThreadIds.size,
       version: currentConfig.version,
     };
   }
 
   function configure(nextConfig) {
-    if (!nextConfig || !nextConfig.base_url || !nextConfig.capability) return false;
+    if (
+      !nextConfig
+      || nextConfig.provider_id !== "grok_native"
+      || !Array.isArray(nextConfig.models)
+      || nextConfig.models.length === 0
+      || !nextConfig.models.every((model) => model && typeof model.model === "string")
+    ) return false;
     currentConfig = nextConfig;
-    currentMode = modes.gpt;
-    bridgeAvailable = false;
-    frameLoaded = false;
-    frame?.remove();
-    frame = null;
-    if (root) createBridge();
+    grokModels = new Set(nextConfig.models.map((model) => model.model));
+    pendingModelListRequests.clear();
     return true;
   }
 
