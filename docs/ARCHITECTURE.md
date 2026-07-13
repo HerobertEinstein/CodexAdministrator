@@ -32,4 +32,4 @@ Implementation is derived independently from Windows, Electron, and CDP public i
 
 ## Update isolation
 
-Host updates are independent and never patched or blocked. Each adapter must report an exact host identity that exists in the verified compatibility manifest before Grok injection is enabled. Unknown versions fail closed to native GPT mode; they do not prevent the official host from launching.
+Host updates are independent and never patched or blocked. Each adapter must report an exact executable SHA-256 identity that exists in the embedded compatibility manifest for the current project/bootstrap versions and accepted E2E evidence before Grok injection is enabled. Unknown identities fail closed to native GPT mode; they do not prevent the official host from launching. The Codex++ adapter removes only its namespaced external bootstrap and configuration key during fallback.

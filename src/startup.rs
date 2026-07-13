@@ -4,14 +4,22 @@ use anyhow::Result;
 use rand::RngCore;
 
 use crate::{
-    BootstrapConfig, codex_plus_bootstrap_path, enable_codex_plus_bootstrap,
-    install_bootstrap_atomically, render_bootstrap,
+    AgentMode, BootstrapConfig, CompatibilityDecision, CompatibilityPolicy, HostAdapterKind,
+    HostIdentity, codex_plus_bootstrap_path, enable_codex_plus_bootstrap,
+    install_bootstrap_atomically, remove_codex_plus_bootstrap, render_bootstrap,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodexPlusPreparation {
     pub bootstrap_path: std::path::PathBuf,
     pub sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexPlusStartupOutcome {
+    pub decision: CompatibilityDecision,
+    pub bootstrap: Option<CodexPlusPreparation>,
+    pub isolation_error: Option<String>,
 }
 
 pub fn generate_capability() -> String {
@@ -36,4 +44,60 @@ pub fn prepare_codex_plus_host(
         bootstrap_path,
         sha256,
     })
+}
+
+pub fn prepare_codex_plus_host_guarded(
+    appdata: &Path,
+    bootstrap_config: &BootstrapConfig,
+    identity: Option<&HostIdentity>,
+    policy: &CompatibilityPolicy,
+) -> CodexPlusStartupOutcome {
+    let identity_sha256 = identity
+        .filter(|identity| identity.adapter == HostAdapterKind::CodexPlusPlus)
+        .map(|identity| identity.sha256.as_str());
+    let decision = policy.evaluate(
+        HostAdapterKind::CodexPlusPlus,
+        identity_sha256,
+        AgentMode::GrokInjectedMain,
+    );
+
+    if decision.injection_enabled() {
+        match prepare_codex_plus_host(appdata, bootstrap_config) {
+            Ok(bootstrap) => {
+                return CodexPlusStartupOutcome {
+                    decision,
+                    bootstrap: Some(bootstrap),
+                    isolation_error: None,
+                };
+            }
+            Err(error) => {
+                let cleanup_error = remove_codex_plus_bootstrap(appdata).err();
+                let error = match cleanup_error {
+                    Some(cleanup_error) => {
+                        format!(
+                            "bootstrap preparation failed: {error}; cleanup failed: {cleanup_error}"
+                        )
+                    }
+                    None => format!("bootstrap preparation failed: {error}"),
+                };
+                return CodexPlusStartupOutcome {
+                    decision: CompatibilityDecision::NativeOnly {
+                        requested: AgentMode::GrokInjectedMain,
+                        reason: "bootstrap_prepare_failed".into(),
+                    },
+                    bootstrap: None,
+                    isolation_error: Some(error),
+                };
+            }
+        }
+    }
+
+    let isolation_error = remove_codex_plus_bootstrap(appdata)
+        .err()
+        .map(|error| format!("failed to remove stale project bootstrap: {error}"));
+    CodexPlusStartupOutcome {
+        decision,
+        bootstrap: None,
+        isolation_error,
+    }
 }

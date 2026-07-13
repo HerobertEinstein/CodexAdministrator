@@ -38,9 +38,26 @@ The injected script is a view bootstrap. It does not own credentials, CLI proces
 - Bundling or redistributing proprietary OpenAI, xAI, or Codex++ binaries.
 - Claiming native capability parity without runtime-specific E2E evidence.
 
-## Update boundary
+## Update isolation
 
-ChatGPT/Codex, Codex++, Grok Build, and Codex CLI keep their own official update channels. Codex Administrator detects installed versions and gates compatibility instead of patching those installations. Codex++ is optional: users may select an installed official release as the host adapter, while the direct adapter remains independent.
+ChatGPT/Codex, Codex++, Grok Build, and Codex CLI keep their own official
+installation and update channels. Codex Administrator does not modify, replace,
+pin, roll back, or block their binaries, packages, update settings, or updaters.
+Codex++ remains an optional installed host adapter; the direct adapter and shared
+companion do not depend on it.
+
+Injection is fail-closed. Every host-side executable identity required by the
+selected adapter must exactly match a published SHA-256 compatibility-manifest
+entry tied to the current project/bootstrap versions and an E2E evidence digest.
+An unreadable, missing, changed, or unknown identity disables Codex Administrator
+injection and launches the official host in `native_gpt_main`. This guarantees
+that an official update remains independent and usable; it does not guarantee
+that injected mode is immediately compatible with every new official release.
+
+Detach/uninstall removes only the exact Codex Administrator bootstrap path and
+configuration key from Codex++'s external user-script data. It never recursively
+cleans official application data or removes official binaries, profiles,
+credentials, conversations, caches, or updater state.
 
 ## Development
 
@@ -65,6 +82,11 @@ cargo run -- serve `
   --codex-plus-path "C:\Path\To\codex-plus-plus.exe"
 ```
 
+The alpha manifest currently contains no accepted host identity. Until an exact
+Codex++ build passes the Windows E2E release gate and is published in
+`compatibility.json`, this command intentionally removes stale project injection,
+reports `native_fallback`, and leaves Codex++ native.
+
 The alpha currently implements the companion, secured injected UI, mode switching, Codex++ bootstrap preparation, compatibility policy, and native runtime launch contracts. Direct ChatGPT activation/CDP ownership and live Grok ACP/Codex app-server turns remain under active development and fail closed rather than claiming support.
 
 Run the local checks:
@@ -75,7 +97,12 @@ cargo test --all-targets
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-See [ARCHITECTURE.md](docs/ARCHITECTURE.md), [COMPATIBILITY.md](docs/COMPATIBILITY.md), [RUNTIME_ADAPTERS.md](docs/RUNTIME_ADAPTERS.md), and [SECURITY.md](SECURITY.md) before contributing to privileged launcher, injection, or runtime code.
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md),
+[UPDATE_ISOLATION.md](docs/UPDATE_ISOLATION.md),
+[COMPATIBILITY.md](docs/COMPATIBILITY.md),
+[RUNTIME_ADAPTERS.md](docs/RUNTIME_ADAPTERS.md), and [SECURITY.md](SECURITY.md)
+before contributing to privileged launcher, injection, update, uninstall, or
+runtime code.
 
 ## Independence
 

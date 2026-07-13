@@ -3,8 +3,10 @@ use std::{env, path::PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use codex_administrator::{
-    BootstrapConfig, CompanionContext, HostAdapterKind, build_companion_router,
-    generate_capability, launch_host_executable, prepare_codex_plus_host,
+    BootstrapConfig, CompanionContext, CompatibilityDecision, CompatibilityManifest,
+    CompatibilityPolicy, HostAdapterKind, HostIdentity, build_companion_router,
+    generate_capability, launch_host_executable, prepare_codex_plus_host_guarded,
+    remove_codex_plus_bootstrap,
 };
 use directories::BaseDirs;
 use serde::Serialize;
@@ -57,9 +59,74 @@ async fn main() -> Result<()> {
 }
 
 async fn serve(args: ServeArgs) -> Result<()> {
+    match args.host {
+        HostAdapterKind::CodexPlusPlus => serve_codex_plus(args).await,
+        HostAdapterKind::Direct => serve_direct(args).await,
+    }
+}
+
+async fn serve_direct(args: ServeArgs) -> Result<()> {
+    if !args.no_launch {
+        bail!(
+            "the direct host launcher is not available in this alpha build; use --no-launch for companion UI development"
+        );
+    }
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
         .await
         .context("failed to bind companion loopback listener")?;
+    let address = listener.local_addr()?;
+    let capability = generate_capability();
+    let context = CompanionContext::new(&capability)?;
+    let ready = serde_json::json!({
+        "status": "ready",
+        "host": args.host,
+        "address": address,
+        "bootstrap": null,
+    });
+    println!("{}", serde_json::to_string(&ready)?);
+
+    axum::serve(listener, build_companion_router(context))
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .context("companion server failed")
+}
+
+async fn serve_codex_plus(args: ServeArgs) -> Result<()> {
+    let appdata = args.appdata.unwrap_or(default_appdata()?);
+    let executable = args
+        .codex_plus_path
+        .or_else(|| find_codex_plus_plus().path)
+        .ok_or_else(|| anyhow::anyhow!("unable to locate the installed Codex++ executable"))?;
+
+    let (policy, manifest_error) =
+        match CompatibilityManifest::shipped().and_then(CompatibilityManifest::into_policy) {
+            Ok(policy) => (policy, None),
+            Err(error) => (
+                CompatibilityPolicy::default(),
+                Some(format!(
+                    "shipped compatibility manifest is invalid: {error}"
+                )),
+            ),
+        };
+    let (identity, identity_error) =
+        match HostIdentity::from_executable(HostAdapterKind::CodexPlusPlus, &executable) {
+            Ok(identity) => (Some(identity), None),
+            Err(error) => (None, Some(format!("host identity probe failed: {error}"))),
+        };
+
+    let listener = match TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            let cleanup_error = remove_codex_plus_bootstrap(&appdata).err();
+            if !args.no_launch {
+                launch_host_executable(&executable)?;
+            }
+            let cleanup = cleanup_error
+                .map(|cleanup| format!("; stale bootstrap cleanup also failed: {cleanup}"))
+                .unwrap_or_default();
+            bail!("companion unavailable; official Codex++ was left native: {error}{cleanup}");
+        }
+    };
     let address = listener.local_addr()?;
     let capability = generate_capability();
     let context = CompanionContext::new(&capability)?;
@@ -67,42 +134,75 @@ async fn serve(args: ServeArgs) -> Result<()> {
         port: address.port(),
         capability,
     };
+    let mut outcome =
+        prepare_codex_plus_host_guarded(&appdata, &bootstrap_config, identity.as_ref(), &policy);
+    let mut startup_warnings = Vec::new();
+    if outcome.bootstrap.is_some()
+        && !identity
+            .as_ref()
+            .is_some_and(|identity| identity.matches_executable(&executable).unwrap_or(false))
+    {
+        let cleanup_error = remove_codex_plus_bootstrap(&appdata).err();
+        startup_warnings.push(
+            "host identity changed or became unreadable after compatibility evaluation".into(),
+        );
+        if let Some(cleanup_error) = cleanup_error {
+            startup_warnings.push(format!(
+                "bootstrap cleanup after identity change failed: {cleanup_error}"
+            ));
+        }
+        outcome = codex_administrator::CodexPlusStartupOutcome {
+            decision: CompatibilityDecision::NativeOnly {
+                requested: codex_administrator::AgentMode::GrokInjectedMain,
+                reason: "host_identity_changed_before_launch".into(),
+            },
+            bootstrap: None,
+            isolation_error: None,
+        };
+    }
 
-    let preparation = match args.host {
-        HostAdapterKind::CodexPlusPlus => {
-            let appdata = args.appdata.unwrap_or(default_appdata()?);
-            let receipt = prepare_codex_plus_host(&appdata, &bootstrap_config)?;
-            if !args.no_launch {
-                let executable = args.codex_plus_path.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "--codex-plus-path is required when launching the Codex++ adapter"
-                    )
-                })?;
-                launch_host_executable(executable)?;
-            }
-            Some(receipt)
-        }
-        HostAdapterKind::Direct => {
-            if !args.no_launch {
-                bail!(
-                    "the direct host launcher is not available in this alpha build; use --no-launch for companion UI development"
-                );
-            }
-            None
-        }
+    if !args.no_launch
+        && let Err(error) = launch_host_executable(&executable)
+    {
+        let cleanup_error = remove_codex_plus_bootstrap(&appdata).err();
+        let cleanup = cleanup_error
+            .map(|cleanup| format!("; bootstrap cleanup also failed: {cleanup}"))
+            .unwrap_or_default();
+        bail!("failed to launch Codex++: {error}{cleanup}");
+    }
+
+    let reason = match &outcome.decision {
+        CompatibilityDecision::Enabled(_) => None,
+        CompatibilityDecision::NativeOnly { reason, .. } => Some(reason.as_str()),
     };
-
+    startup_warnings.extend(
+        [
+            manifest_error,
+            identity_error,
+            outcome.isolation_error.clone(),
+        ]
+        .into_iter()
+        .flatten(),
+    );
     let ready = serde_json::json!({
-        "status": "ready",
+        "status": if outcome.bootstrap.is_some() { "ready" } else { "native_fallback" },
         "host": args.host,
         "address": address,
-        "bootstrap": preparation.as_ref().map(|receipt| serde_json::json!({
+        "effective_mode": outcome.decision.effective_mode(),
+        "injection_enabled": outcome.decision.injection_enabled(),
+        "reason": reason,
+        "host_identity": identity,
+        "bootstrap": outcome.bootstrap.as_ref().map(|receipt| serde_json::json!({
             "path": receipt.bootstrap_path,
             "sha256": receipt.sha256,
         })),
+        "warnings": startup_warnings,
     });
     println!("{}", serde_json::to_string(&ready)?);
 
+    if outcome.bootstrap.is_none() {
+        return Ok(());
+    }
     axum::serve(listener, build_companion_router(context))
         .with_graceful_shutdown(shutdown_signal())
         .await

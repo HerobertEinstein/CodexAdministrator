@@ -1,31 +1,82 @@
-# Compatibility And Update Isolation
+# Compatibility
 
-Codex Administrator cannot control whether an external product changes an undocumented UI or integration surface. It instead provides an enforceable update-isolation contract.
+Compatibility is an explicit allowlist, not an assumption inferred from an
+upstream product name or version label. The separate
+[update-isolation contract](UPDATE_ISOLATION.md) protects official installation
+and update autonomy even when no compatible injection is available.
 
-## Guarantees
+## Compatibility Identity
 
-- Official ChatGPT/Codex and Codex++ files, packages, update settings, and updaters are never modified.
-- Direct and Codex++ host adapters are mutually exclusive for one host instance.
-- Every host adapter reports an exact observed host version/build identity before injection is enabled.
-- Only versions present in the verified compatibility manifest may enter `grok_injected_main`.
-- Missing or unknown versions fail closed to `native_gpt_main` while leaving the official host usable.
-- Bootstrap health is checked after injection, navigation, target recreation, and restart.
-- Project data and injected UI can be disabled or removed without rolling back an official application update.
-- Grok Build and Codex app-server adapters are version-gated independently from the host adapter.
+Every supported combination has one immutable manifest entry containing at
+least:
 
-## Non-guarantees
+- host adapter: `direct` or `codexplusplus`;
+- the executable's exact SHA-256 digest used as its binary identity;
+- the exact Codex Administrator project version;
+- the exact bootstrap contract version; and
+- the accepted E2E evidence SHA-256 digest.
 
-No independent project can guarantee that an unannounced upstream change will preserve an undocumented DOM, process, or CDP behavior. Codex Administrator therefore never treats a newly observed version as compatible before its contract and E2E matrix pass.
+Every SHA-256 digest required by the selected adapter is mandatory. Publisher
+and version metadata cannot replace one. Entries are not wildcarded across
+binary digests, host adapters, product channels, or architectures. Runtime
+identities for Grok Build and Codex app-server are gated independently from the
+desktop host identity.
 
-## Release gate
+## Decision Table
 
-A compatibility entry requires:
+| Observed state | Project injection | Official host launch |
+| --- | --- | --- |
+| Every required identity exactly matches the manifest and accepted E2E evidence | Allowed for the listed adapter and capabilities | Continue |
+| Any required binary is missing or has an unknown/changed SHA-256 digest | Disabled | Continue in unmodified `native_gpt_main` |
+| Identity probe cannot read or hash the binary | Disabled | Continue in unmodified `native_gpt_main` |
+| Manifest or evidence is missing, invalid, or revoked | Disabled | Continue in unmodified `native_gpt_main` |
+| Bootstrap health fails after injection | Dispose project UI and disable injection | Restore/continue `native_gpt_main` |
 
-1. Clean installation of the official host version.
-2. Native GPT launch with injection disabled.
-3. Grok UI mount, mode switching, disposal, and official UI restoration.
-4. Renderer navigation and target recreation recovery.
+No network lookup, version similarity, or successful one-off mount may bypass
+this table. A host update cannot be blocked while maintainers prepare a new
+entry.
+
+## E2E Evidence Matrix
+
+A compatibility entry requires reproducible evidence from a clean installation
+of the exact binary identity. At minimum, the matrix covers:
+
+1. Official host launch and native GPT use with injection disabled.
+2. Unknown-identity fallback with no bootstrap, CDP mutation, or startup block.
+3. Grok UI mount, mode switching, disposal, and complete official UI
+   restoration.
+4. Renderer navigation, target recreation, host restart, and project restart.
 5. Grok session create/resume/cancel and Codex app-server subtask execution.
-6. Approval, worktree ownership, restart, and failure-path tests.
+6. Approvals, cancellation, workspace/worktree ownership, and process-tree
+   cleanup.
+7. Bootstrap or companion failure after launch and recovery to
+   `native_gpt_main`.
+8. Uninstall against a populated official profile, proving that only
+   ledger-recorded project artifacts are removed.
 
-Compatibility entries identify the adapter, exact host build, bootstrap version, companion version, and E2E evidence digest.
+Evidence must identify the OS build, architecture, adapter, all required binary
+SHA-256 digests, project commit/release, test implementation, result, and
+immutable artifact digest. A screenshot alone or an undocumented manual
+assertion is insufficient.
+
+The alpha `compatibility.json` intentionally has no accepted host entries. A
+locally detected digest is never auto-enrolled.
+
+## Manifest Governance
+
+- New identities enter the manifest only through review of the full matrix.
+- A changed required binary digest requires a new entry and new evidence even
+  when its version string is unchanged.
+- Failed or vulnerable combinations are revoked; revocation disables project
+  injection without changing the official installation.
+- Local manifest edits do not constitute published support.
+- CI schema checks are necessary but do not replace Windows E2E evidence.
+
+## Compatibility Limits
+
+Codex Administrator cannot guarantee that an unannounced upstream change will
+preserve undocumented DOM, Electron, process, CDP, user-script, ACP, or
+app-server behavior. The project guarantees fail-closed isolation and native
+startup for unknown identities; it guarantees injection compatibility only for
+the exact combinations backed by a published manifest entry and accepted E2E
+evidence.

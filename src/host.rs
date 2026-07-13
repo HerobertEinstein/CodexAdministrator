@@ -13,6 +13,12 @@ use sha2::{Digest, Sha256};
 
 pub const CODEX_PLUS_BOOTSTRAP_KEY: &str = "user:codex-administrator-bootstrap.js";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodexPlusRemovalReceipt {
+    pub script_removed: bool,
+    pub config_updated: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum HostAdapterKind {
@@ -102,6 +108,48 @@ pub fn enable_codex_plus_bootstrap(config_path: &Path) -> Result<()> {
     let content = serde_json::to_vec_pretty(&root)?;
     install_bootstrap_atomically(config_path, &content)?;
     Ok(())
+}
+
+pub fn remove_codex_plus_bootstrap(appdata: &Path) -> Result<CodexPlusRemovalReceipt> {
+    let bootstrap_path = codex_plus_bootstrap_path(appdata);
+    let script_removed = match fs::remove_file(&bootstrap_path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("failed to remove bootstrap {}", bootstrap_path.display())
+            });
+        }
+    };
+
+    let config_path = appdata.join("Codex++").join("user_scripts.json");
+    if !config_path.exists() {
+        return Ok(CodexPlusRemovalReceipt {
+            script_removed,
+            config_updated: false,
+        });
+    }
+
+    let content = fs::read(&config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+    let mut root: Value = serde_json::from_slice(&content)
+        .with_context(|| format!("failed to parse {}", config_path.display()))?;
+    let object = root
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("Codex++ user script config must be a JSON object"))?;
+    let config_updated = object
+        .get_mut("scripts")
+        .and_then(Value::as_object_mut)
+        .is_some_and(|scripts| scripts.remove(CODEX_PLUS_BOOTSTRAP_KEY).is_some());
+    if config_updated {
+        let content = serde_json::to_vec_pretty(&root)?;
+        install_bootstrap_atomically(&config_path, &content)?;
+    }
+
+    Ok(CodexPlusRemovalReceipt {
+        script_removed,
+        config_updated,
+    })
 }
 
 fn unique_temp_path(path: &Path) -> PathBuf {
