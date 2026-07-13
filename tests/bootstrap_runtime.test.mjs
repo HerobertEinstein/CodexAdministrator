@@ -24,8 +24,14 @@ const grokModel = {
   isDefault: false,
 };
 
-async function boot({ bridgeInitiallyAvailable = true } = {}) {
-  const [core, template] = await Promise.all([
+async function boot({
+  autoDiscoverRendererApi = false,
+  bridgeInitiallyAvailable = true,
+  frozenBridge = false,
+  rendererApiAvailable = false,
+} = {}) {
+  const [discovery, core, template] = await Promise.all([
+    readFile(new URL("renderer-api-discovery.js", assets), "utf8"),
     readFile(new URL("model-injection-core.js", assets), "utf8"),
     readFile(new URL("bootstrap.js", assets), "utf8"),
   ]);
@@ -36,6 +42,9 @@ async function boot({ bridgeInitiallyAvailable = true } = {}) {
   const originalSend = async (message) => {
     sent.push(message);
   };
+  const rendererApi = rendererApiAvailable || autoDiscoverRendererApi
+    ? { getState() {}, postMessage: originalSend, setState() {} }
+    : null;
   const window = {
     addEventListener(type, listener, options) {
       const entries = listeners.get(type) || [];
@@ -48,25 +57,90 @@ async function boot({ bridgeInitiallyAvailable = true } = {}) {
     },
   };
   if (bridgeInitiallyAvailable) {
-    window.electronBridge = { sendMessageFromView: originalSend };
+    const bridge = { sendMessageFromView: originalSend };
+    window.electronBridge = frozenBridge ? Object.freeze(bridge) : bridge;
+  }
+  if (rendererApiAvailable && rendererApi) window.__codexAdministratorRendererApi = rendererApi;
+  const discoveryImports = [];
+  if (autoDiscoverRendererApi) {
+    window.__codexAdministratorImportRendererModule = async (url) => {
+      discoveryImports.push(url);
+      return { rendererApi };
+    };
   }
   const context = vm.createContext({
     clearInterval(id) {
       intervals.delete(id);
     },
     console,
+    document: autoDiscoverRendererApi
+      ? { scripts: [{ src: "app://-/assets/index-build.js", type: "module" }] }
+      : undefined,
+    fetch: autoDiscoverRendererApi
+      ? async () => ({ ok: true, text: async () => 'import "./vscode-api-review123.js";' })
+      : undefined,
     Set,
     setInterval(callback) {
       const id = nextIntervalId++;
       intervals.set(id, callback);
       return id;
     },
+    URL,
     window,
   });
   const config = JSON.stringify({ version: 2, provider_id: "grok_native", models: [grokModel] });
-  vm.runInContext(`${core}\n${template.replace("/*__CODEX_ADMINISTRATOR_CONFIG__*/", config)}`, context);
-  return { context, intervals, listeners, originalSend, sent, window };
+  vm.runInContext(
+    `${discovery}\n${core}\n${template.replace("/*__CODEX_ADMINISTRATOR_CONFIG__*/", config)}`,
+    context,
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+  if (autoDiscoverRendererApi) {
+    for (let attempt = 0; attempt < 5 && discoveryImports.length === 0; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+  return {
+    context,
+    discoveryImports,
+    intervals,
+    listeners,
+    originalSend,
+    rendererApi,
+    sent,
+    window,
+  };
 }
+
+test("bootstrap patches the renderer API without modifying a frozen native bridge", async () => {
+  const { originalSend, rendererApi, sent, window } = await boot({
+    frozenBridge: true,
+    rendererApiAvailable: true,
+  });
+  const grok = {
+    type: "mcp-request",
+    request: { id: 2, method: "thread/start", params: { model: "grok-4" } },
+  };
+
+  assert.equal(window.electronBridge.sendMessageFromView, originalSend);
+  assert.notEqual(rendererApi.postMessage, originalSend);
+  await rendererApi.postMessage(grok);
+
+  assert.equal(sent[0].request.params.modelProvider, "grok_native");
+  assert.equal(window.electronBridge.sendMessageFromView, originalSend);
+});
+
+test("bootstrap discovers the official renderer API without modifying a frozen bridge", async () => {
+  const { discoveryImports, originalSend, rendererApi, window } = await boot({
+    autoDiscoverRendererApi: true,
+    frozenBridge: true,
+  });
+
+  assert.deepEqual(discoveryImports, ["app://-/assets/vscode-api-review123.js"]);
+  assert.equal(window.electronBridge.sendMessageFromView, originalSend);
+  assert.notEqual(rendererApi.postMessage, originalSend);
+  assert.equal(window.__codexAdministrator.health().ok, true);
+});
 
 test("bootstrap installs after the native bridge becomes available", async () => {
   const { intervals, originalSend, window } = await boot({ bridgeInitiallyAvailable: false });

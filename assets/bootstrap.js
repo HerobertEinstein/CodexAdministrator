@@ -3,6 +3,7 @@
 
   const config = /*__CODEX_ADMINISTRATOR_CONFIG__*/;
   const core = globalThis.__codexAdministratorModelInjectionCore;
+  const rendererApiDiscovery = globalThis.__codexAdministratorRendererApiDiscovery;
   if (!core) return;
 
   const prior = window.__codexAdministrator;
@@ -16,12 +17,16 @@
   let grokModels = new Set(config.models.map((model) => model.model));
   const grokThreadIds = new Set();
   const pendingModelListRequests = new Set();
-  let activeBridge = null;
-  let originalSendMessageFromView = null;
-  let patchedSendMessageFromView = null;
+  let activeTransport = null;
+  let activeTransportMethod = null;
+  let originalPostMessage = null;
+  let patchedPostMessage = null;
   let messageListenerInstalled = false;
   let bridgeRetryTimer = null;
   let bridgeRetryAttempts = 0;
+  let rendererDiscoveryPromise = null;
+  let discoveredRendererApi = null;
+  let mounted = false;
 
   function stopBridgeRetry() {
     if (bridgeRetryTimer !== null) {
@@ -34,19 +39,70 @@
   function retryBridgePatch() {
     bridgeRetryAttempts += 1;
     if (installBridgePatch()) return;
+    requestRendererApiDiscovery();
     if (bridgeRetryAttempts >= 300) stopBridgeRetry();
   }
 
+  function requestRendererApiDiscovery() {
+    if (
+      !mounted
+      || !rendererApiDiscovery
+      || rendererDiscoveryPromise
+      || window.__codexAdministratorRendererApi
+      || typeof document === "undefined"
+      || typeof fetch !== "function"
+    ) {
+      return;
+    }
+    const importModule = typeof window.__codexAdministratorImportRendererModule === "function"
+      ? window.__codexAdministratorImportRendererModule
+      : (url) => import(url);
+    rendererDiscoveryPromise = rendererApiDiscovery.discoverRendererApi({
+      documentRef: document,
+      fetchFn: (url) => fetch(url),
+      importModule,
+    }).then((rendererApi) => {
+      if (!mounted || !rendererApi) return;
+      discoveredRendererApi = rendererApi;
+      window.__codexAdministratorRendererApi = rendererApi;
+      installBridgePatch();
+    }).catch(() => {
+      // An unknown host stays native until an exact renderer API is found.
+    }).finally(() => {
+      rendererDiscoveryPromise = null;
+    });
+  }
+
+  function findWritableTransport() {
+    const candidates = [
+      [window.__codexAdministratorRendererApi, "postMessage"],
+      [window.electronBridge, "sendMessageFromView"],
+    ];
+    for (const [target, method] of candidates) {
+      if (!target || typeof target[method] !== "function") continue;
+      const descriptor = Object.getOwnPropertyDescriptor(target, method);
+      if (descriptor && descriptor.writable === false && typeof descriptor.set !== "function") {
+        continue;
+      }
+      return { method, target };
+    }
+    return null;
+  }
+
   function installBridgePatch() {
-    const bridge = window.electronBridge;
-    if (!bridge || typeof bridge.sendMessageFromView !== "function") return false;
-    if (activeBridge === bridge && bridge.sendMessageFromView === patchedSendMessageFromView) {
+    const candidate = findWritableTransport();
+    if (!candidate) return false;
+    const { method, target } = candidate;
+    if (
+      activeTransport === target
+      && activeTransportMethod === method
+      && target[method] === patchedPostMessage
+    ) {
       return true;
     }
     restoreBridgePatch();
-    activeBridge = bridge;
-    originalSendMessageFromView = bridge.sendMessageFromView;
-    patchedSendMessageFromView = function codexAdministratorSendMessageFromView(message) {
+    const original = target[method];
+    const patched = function codexAdministratorPostMessage(message) {
       core.trackModelListRequest(message, pendingModelListRequests);
       const routed = core.routeProvider(
         message,
@@ -54,25 +110,41 @@
         currentConfig.provider_id,
         grokThreadIds,
       );
-      return originalSendMessageFromView.call(bridge, routed);
+      return original.call(target, routed);
     };
-    bridge.sendMessageFromView = patchedSendMessageFromView;
-    const installed = bridge.sendMessageFromView === patchedSendMessageFromView;
+    try {
+      target[method] = patched;
+    } catch {
+      return false;
+    }
+    const installed = target[method] === patched;
+    if (installed) {
+      activeTransport = target;
+      activeTransportMethod = method;
+      originalPostMessage = original;
+      patchedPostMessage = patched;
+    }
     if (installed) stopBridgeRetry();
     return installed;
   }
 
   function restoreBridgePatch() {
     if (
-      activeBridge
-      && originalSendMessageFromView
-      && activeBridge.sendMessageFromView === patchedSendMessageFromView
+      activeTransport
+      && activeTransportMethod
+      && originalPostMessage
+      && activeTransport[activeTransportMethod] === patchedPostMessage
     ) {
-      activeBridge.sendMessageFromView = originalSendMessageFromView;
+      try {
+        activeTransport[activeTransportMethod] = originalPostMessage;
+      } catch {
+        // A host update may freeze the transport after mounting; fail closed.
+      }
     }
-    activeBridge = null;
-    originalSendMessageFromView = null;
-    patchedSendMessageFromView = null;
+    activeTransport = null;
+    activeTransportMethod = null;
+    originalPostMessage = null;
+    patchedPostMessage = null;
   }
 
   function handleMessage(event) {
@@ -81,11 +153,13 @@
   }
 
   function mount() {
+    mounted = true;
     if (!messageListenerInstalled) {
       window.addEventListener("message", handleMessage, true);
       messageListenerInstalled = true;
     }
     if (installBridgePatch()) return true;
+    requestRendererApiDiscovery();
     if (bridgeRetryTimer === null) {
       bridgeRetryAttempts = 0;
       bridgeRetryTimer = setInterval(retryBridgePatch, 100);
@@ -94,6 +168,7 @@
   }
 
   function dispose() {
+    mounted = false;
     stopBridgeRetry();
     restoreBridgePatch();
     if (messageListenerInstalled) {
@@ -102,6 +177,17 @@
     }
     pendingModelListRequests.clear();
     grokThreadIds.clear();
+    if (
+      discoveredRendererApi
+      && window.__codexAdministratorRendererApi === discoveredRendererApi
+    ) {
+      try {
+        delete window.__codexAdministratorRendererApi;
+      } catch {
+        // The namespaced discovery handle is optional cleanup only.
+      }
+    }
+    discoveredRendererApi = null;
     return true;
   }
 
@@ -109,8 +195,9 @@
     return {
       ok: Boolean(
         messageListenerInstalled
-        && activeBridge
-        && activeBridge.sendMessageFromView === patchedSendMessageFromView
+        && activeTransport
+        && activeTransportMethod
+        && activeTransport[activeTransportMethod] === patchedPostMessage
       ),
       provider: currentConfig.provider_id,
       models: currentConfig.models.map((model) => model.model),

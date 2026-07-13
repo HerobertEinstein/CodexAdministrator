@@ -38,9 +38,11 @@ support in the official desktop application.
 
 - Provider registration is implemented and covered by configuration tests.
 - The model-list and per-task routing bridge is covered by message-level tests.
-- Direct injection into the official desktop application is disabled until a
-  real desktop E2E run proves startup, model visibility, selection, disposal,
-  and native GPT preservation.
+- A real official-desktop probe has proved a separate profile, process tree,
+  CDP port, frozen-bridge preservation, writable renderer-API composition,
+  exact disposal, and daily-process survival. Direct injection remains
+  disabled until those checks are enforced by the production launcher and
+  target monitor.
 - The Codex++ adapter writes only an external user script. The shipped
   compatibility manifest is empty, so unverified releases remain native and
   any stale project script is removed.
@@ -66,7 +68,8 @@ prints, or stores the key value. Remote URLs require HTTPS and must end in
 
 ## Model-List Injection
 
-The direct adapter currently fails closed:
+The direct adapter currently fails closed because the production isolated
+launcher is not implemented:
 
 ```powershell
 cargo run -- inject --host direct --model grok-4
@@ -88,10 +91,13 @@ script when `--no-launch` is omitted.
 ## Update Isolation
 
 Codex Administrator never edits official installation directories, packaged
-resources, executables, signatures, profiles, updater services, update
-settings, or update channels. Project-owned writes are limited to:
+resources, executables, signatures, the daily profile, updater services,
+update settings, or update channels. A future direct adapter may create only
+its own isolated profile and isolated `CODEX_HOME`; neither path may equal,
+contain, or be contained by a daily path. Project-owned writes are limited to:
 
-- the exact `model_providers.grok_native` entry in user configuration; and
+- the exact `model_providers.grok_native` entry in user configuration;
+- project-owned isolated profile and `CODEX_HOME` data for a direct instance;
 - the exact Codex++ external user-script file and enablement key when that
   adapter passes its compatibility gate.
 

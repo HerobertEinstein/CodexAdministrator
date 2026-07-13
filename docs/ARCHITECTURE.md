@@ -58,22 +58,42 @@ task between providers. GPT traffic is passed through as the same object.
 
 ## Lifecycle
 
-The bootstrap waits for a delayed native bridge, installs one wrapper, and
-exposes a namespaced health/dispose handle. Disposal restores the exact
-official function only when the wrapper still owns that slot, removes its
-capture listener, stops retries, and clears project-owned task state.
+The bootstrap locates the official same-origin `vscode-api-*` renderer module
+from the native entry bundle and wraps its writable `postMessage` abstraction.
+It does not replace the frozen `window.electronBridge` object or its native
+method. A writable legacy bridge is a compatibility fallback only. Disposal
+restores the exact prior renderer function only when the wrapper still owns
+that slot, removes its capture listener, stops retries, and clears
+project-owned task state.
 
 ## Host Adapters
 
 The bridge source is host-independent. Adapters only determine how the same
 script reaches the page:
 
-- `direct`: reserved for a project-owned desktop debugging connection and
-  currently disabled pending desktop E2E;
+- `direct`: reserved for an isolated official desktop instance and currently
+  disabled until the production launcher enforces separate profile,
+  `CODEX_HOME`, process tree, and loopback CDP ownership;
 - `codexplusplus`: external user script, enabled only for an exact reviewed
   executable identity.
 
 No adapter may modify an official installation file.
+
+## Direct Instance Isolation
+
+The direct adapter may never attach to, activate, restart, close, or inject the
+currently used daily ChatGPT/Codex instance. Its launch contract requires:
+
+- a project-owned profile that does not overlap the daily profile;
+- a project-owned `CODEX_HOME` that does not overlap any daily path;
+- a new process tree disjoint from every pre-existing ChatGPT PID;
+- a new loopback CDP port with an `app://-/index.html` renderer target; and
+- continuous proof that the daily root instance remains alive.
+
+Windows currently needs a two-stage launch for the isolated profile: the first
+start creates its background process and CDP endpoint, and a second start with
+the same isolated arguments plus `--new-window` creates that isolated
+renderer. Failure at any gate leaves direct injection disabled.
 
 ## Capability Boundary
 

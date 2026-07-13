@@ -3,6 +3,7 @@
 mod bootstrap;
 mod compatibility;
 mod host;
+mod isolation;
 mod native_provider;
 mod startup;
 
@@ -17,6 +18,7 @@ pub use host::{
     codex_plus_bootstrap_path, enable_codex_plus_bootstrap, install_bootstrap_atomically,
     launch_host_executable, remove_codex_plus_bootstrap,
 };
+pub use isolation::{DirectIsolationContract, IsolatedRuntimeObservation};
 pub use native_provider::{
     GROK_NATIVE_PROVIDER_ID, GrokNativeProviderConfig, NativeProviderInstallReceipt,
     install_grok_native_provider,

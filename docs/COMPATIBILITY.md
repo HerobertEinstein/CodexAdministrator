@@ -21,14 +21,19 @@ the host native. The shipped alpha manifest is intentionally empty.
 
 Before a host identity is accepted, a fresh desktop run must prove:
 
-1. the native interface starts without modified installation files;
-2. every native GPT entry remains present and unchanged;
-3. each configured Grok entry appears once;
-4. selecting GPT emits the original request object;
-5. selecting Grok routes only new Grok tasks to `grok_native`;
-6. a known Grok task resumes through the same provider;
-7. disposal restores the official bridge; and
-8. an incompatible update leaves the host native.
+1. a separate profile, `CODEX_HOME`, process tree, and loopback CDP port are
+   established without touching the daily instance;
+2. the daily root instance remains alive before, during, and after injection;
+3. the native interface starts without modified installation files;
+4. the frozen official bridge retains the exact same object and function
+   identity;
+5. every native GPT entry remains present and unchanged;
+6. each configured Grok entry appears once;
+7. selecting GPT emits the original request object;
+8. selecting Grok routes only new Grok tasks to `grok_native`;
+9. a known Grok task resumes through the same provider;
+10. disposal restores the exact prior writable renderer API function; and
+11. an incompatible update leaves the host native.
 
 Message-level tests are necessary but do not satisfy this desktop gate.
 

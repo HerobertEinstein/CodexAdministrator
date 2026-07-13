@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use crate::GROK_NATIVE_PROVIDER_ID;
 
+const RENDERER_API_DISCOVERY: &str = include_str!("../assets/renderer-api-discovery.js");
 const MODEL_INJECTION_CORE: &str = include_str!("../assets/model-injection-core.js");
 const BOOTSTRAP_TEMPLATE: &str = include_str!("../assets/bootstrap.js");
 
@@ -178,7 +179,9 @@ pub fn render_bootstrap(config: &BootstrapConfig) -> Result<String> {
         models,
     })?;
     let bootstrap = BOOTSTRAP_TEMPLATE.replace("/*__CODEX_ADMINISTRATOR_CONFIG__*/", &serialized);
-    Ok(format!("{MODEL_INJECTION_CORE}\n{bootstrap}"))
+    Ok(format!(
+        "{RENDERER_API_DISCOVERY}\n{MODEL_INJECTION_CORE}\n{bootstrap}"
+    ))
 }
 
 fn validate_text(value: &str, field: &str, max_len: usize, allow_empty: bool) -> Result<()> {

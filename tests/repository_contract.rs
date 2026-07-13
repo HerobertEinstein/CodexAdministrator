@@ -34,6 +34,7 @@ fn active_repository_surfaces_describe_only_model_list_injection() {
         "docs/UPDATE_ISOLATION.md",
         ".agent_memory/MEMORY.md",
         ".agent_memory/decisions/model-list-injection-boundary.md",
+        ".agent_memory/decisions/isolated-official-desktop-instance.md",
         ".agent_memory/decisions/update-isolation-contract.md",
     ];
     let forbidden = [

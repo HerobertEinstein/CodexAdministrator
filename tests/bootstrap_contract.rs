@@ -10,6 +10,7 @@ fn config() -> BootstrapConfig {
 fn renders_an_idempotent_namespaced_native_provider_bridge() {
     let script = render_bootstrap(&config()).unwrap();
 
+    assert!(script.contains("__codexAdministratorRendererApiDiscovery"));
     assert!(script.contains("window.__codexAdministrator"));
     assert!(script.contains("__codexAdministratorModelInjectionCore"));
     assert!(script.contains("grok_native"));
@@ -42,9 +43,7 @@ fn bootstrap_does_not_create_a_second_cdp_bridge() {
 fn bootstrap_has_no_replacement_interface() {
     let script = render_bootstrap(&config()).unwrap();
 
-    assert!(!script.contains("fetch("));
     assert!(!script.contains("createElement(\"iframe\")"));
-    assert!(!script.contains("postMessage"));
     assert!(!script.contains("/ui/"));
 }
 

@@ -115,7 +115,7 @@ fn inject(args: InjectArgs) -> Result<()> {
 
     match args.host {
         HostAdapterKind::Direct => bail!(
-            "direct ChatGPT/Codex injection is disabled pending desktop E2E; no official process or file was modified"
+            "direct ChatGPT/Codex injection is disabled because the isolated launcher is not implemented; no daily profile, process, CDP target, or official file was touched"
         ),
         HostAdapterKind::CodexPlusPlus => inject_codex_plus(args, bootstrap_config),
     }
@@ -216,7 +216,7 @@ fn doctor(args: DoctorArgs) -> Result<()> {
         adapters: AdapterReport {
             direct: DirectAdapterReport {
                 enabled: false,
-                reason: "pending_desktop_e2e",
+                reason: "isolated_launcher_not_implemented",
             },
             codex_plus_plus: find_codex_plus_plus(),
         },

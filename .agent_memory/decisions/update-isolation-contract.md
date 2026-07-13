@@ -6,6 +6,7 @@ updated: 2026-07-13
 scope: project
 paths:
   - src/host.rs
+  - src/isolation.rs
   - src/compatibility.rs
   - docs/COMPATIBILITY.md
   - docs/HOST_ADAPTERS.md
@@ -21,7 +22,8 @@ verified_by:
 Official ChatGPT/Codex and Codex++ installations and update mechanisms remain
 publisher-owned. The project may write only the exact Grok provider entry and,
 for a verified Codex++ executable, its exact external script file and enablement
-key.
+key. A direct adapter may create only a project-owned isolated profile and
+isolated `CODEX_HOME`; neither may overlap a daily path.
 
 Unknown host identities fail closed. They do not block the host or alter native
 GPT behavior. Provider registration preserves model selection and unrelated
@@ -29,6 +31,8 @@ configuration.
 
 ## Use Next Time
 
-Never modify installation files, packaged resources, signatures, profiles,
-updater state, or native model defaults. Renew compatibility evidence after a
-host update instead of pinning or interfering with that update.
+Never modify installation files, packaged resources, signatures, the daily
+profile, updater state, or native model defaults. A project-owned isolated
+profile must pass the path-overlap and runtime ownership contract before use.
+Renew compatibility evidence after a host update instead of pinning or
+interfering with that update.

@@ -99,7 +99,7 @@ fn injection_help_exposes_both_host_adapters_without_a_secret_argument() {
 }
 
 #[test]
-fn direct_injection_is_explicitly_disabled_until_desktop_e2e_exists() {
+fn direct_injection_is_explicitly_disabled_until_the_isolated_launcher_exists() {
     let output = Command::new(env!("CARGO_BIN_EXE_codex-administrator"))
         .args([
             "inject",
@@ -114,7 +114,7 @@ fn direct_injection_is_explicitly_disabled_until_desktop_e2e_exists() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("disabled pending desktop E2E"));
+    assert!(stderr.contains("isolated launcher is not implemented"));
 }
 
 #[test]
@@ -128,6 +128,10 @@ fn doctor_emits_machine_readable_output_without_credentials() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["product"], "Codex Administrator");
     assert!(value.get("adapters").is_some());
+    assert_eq!(
+        value["adapters"]["direct"]["reason"],
+        "isolated_launcher_not_implemented"
+    );
     let rendered = value.to_string().to_ascii_lowercase();
     assert!(!rendered.contains("capability"));
     assert!(!rendered.contains("api_key"));

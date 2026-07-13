@@ -9,6 +9,8 @@ The project may write only:
 
 - `model_providers.grok_native` in the supported user-owned Codex
   configuration;
+- a project-owned isolated profile and isolated `CODEX_HOME` for a direct
+  instance;
 - its generated Codex++ external script; and
 - its exact Codex++ script enablement key.
 
@@ -18,9 +20,11 @@ model catalog, existing providers, or unknown future settings.
 ## Forbidden Writes
 
 The project must not edit or replace installation directories, executables,
-packaged resources, signatures, launchers, profiles, updater services, update
-settings, or update channels. It must not store credential values in source,
-arguments, configuration, logs, reports, tests, or compatibility evidence.
+packaged resources, signatures, native launchers, the daily profile, updater
+services, update settings, or update channels. An isolated profile or
+`CODEX_HOME` must not equal, contain, or be contained by any daily path. The
+project must not store credential values in source, arguments, configuration,
+logs, reports, tests, or compatibility evidence.
 
 ## Fail-Closed Updates
 
@@ -30,6 +34,7 @@ failure leaves the existing configuration untouched.
 
 ## Removal
 
-Removal may delete only project-owned entries and files. It must preserve all
-native models, user defaults, other provider definitions, profiles, tasks,
-credentials, caches, and updater state.
+Removal may delete only project-owned entries, files, and isolated instance
+directories after their absolute paths pass the isolation contract. It must
+preserve all native models, user defaults, other provider definitions, daily
+profiles, tasks, credentials, caches, and updater state.

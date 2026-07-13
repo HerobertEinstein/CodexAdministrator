@@ -5,10 +5,21 @@ owns model execution or the native interface.
 
 ## Direct
 
-The direct adapter is reserved for a project-owned debugging connection to the
-official desktop application. It is disabled in the current alpha because a
-real desktop E2E run has not yet established a safe startup and reinjection
-path. Calling it returns an error before touching an official process or file.
+The direct adapter is reserved for a project-owned isolated instance of the
+official desktop application. It may not reuse or activate the daily instance.
+
+A read-only probe of official package `OpenAI.Codex 26.707.8479.0` established
+that a separate profile and loopback CDP port create a separate process tree.
+Starting the same isolated profile a second time with `--new-window` creates an
+`app://-/index.html` target on that isolated port. The official
+`window.electronBridge` is frozen, sealed, and non-writable; the reviewed hook
+therefore composes the writable renderer `postMessage` API discovered from the
+same-origin entry bundle instead of replacing the bridge.
+
+The direct adapter remains disabled because the production launcher, process
+ownership monitor, reinjection monitor, and cleanup lifecycle are not yet
+implemented. Calling it returns an error before touching any daily profile,
+process, CDP target, or official file.
 
 ## Codex++
 
