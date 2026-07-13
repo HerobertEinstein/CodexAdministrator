@@ -1,0 +1,8 @@
+/target/
+/output/
+/.playwright-cli/
+/.idea/
+/.vscode/
+*.pdb
+*.log
+.DS_Store
