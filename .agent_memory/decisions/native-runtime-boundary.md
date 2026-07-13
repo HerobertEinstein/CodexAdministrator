@@ -24,6 +24,12 @@ Codex uses app-server messages without a `jsonrpc` member. Grok uses ACP v1
 JSON-RPC 2.0. Shared code owns only framing, request correlation, stderr
 separation, timeouts, and lifecycle containment.
 
+The official runtime node is the `@xai-official/grok` package and `grok`
+executable. `grok-build` is a coding-agent/model profile within that CLI, not a
+separate executable. Other identifiers returned by `grok models` require their
+own capability and E2E proof. The official Grok Build Claude Code plugin invokes
+the same CLI and is not another runtime.
+
 On Windows, runtime process trees are assigned to a kill-on-close Job Object.
 Shell wrappers are never executed. The official npm Codex installation is
 resolved to `node.exe` plus the absolute `@openai/codex/bin/codex.js` path;
