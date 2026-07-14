@@ -118,6 +118,7 @@ impl DirectIsolationContract {
             )),
             OsString::from("--remote-debugging-address=127.0.0.1"),
             OsString::from(format!("--remote-debugging-port={}", self.cdp_port)),
+            OsString::from("--do-not-de-elevate"),
             OsString::from("--no-first-run"),
         ]
     }

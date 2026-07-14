@@ -69,6 +69,7 @@ fn launch_arguments_and_environment_reference_only_the_isolated_instance() {
     )));
     assert!(launch.contains(&OsString::from("--remote-debugging-address=127.0.0.1")));
     assert!(launch.contains(&OsString::from("--remote-debugging-port=9341")));
+    assert!(launch.contains(&OsString::from("--do-not-de-elevate")));
     assert!(
         !launch
             .iter()

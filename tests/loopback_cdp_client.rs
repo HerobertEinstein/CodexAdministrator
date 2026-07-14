@@ -151,6 +151,84 @@ fn bootstrap_install_waits_for_a_healthy_provider_on_the_same_websocket() {
 }
 
 #[test]
+fn bootstrap_reinstalls_after_the_renderer_context_resets_during_startup() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = accept(stream).unwrap();
+
+        let first_inject = read_command(&mut socket);
+        assert_eq!(first_inject["params"]["expression"], "bootstrap();");
+        socket
+            .send(Message::Text(
+                json!({
+                    "id": first_inject["id"],
+                    "result": {"result": {"type": "undefined"}}
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+
+        let missing_health = read_command(&mut socket);
+        assert!(
+            missing_health["params"]["expression"]
+                .as_str()
+                .unwrap()
+                .contains("__codexAdministrator")
+        );
+        socket
+            .send(Message::Text(
+                json!({
+                    "id": missing_health["id"],
+                    "result": {"result": {"type": "object", "value": null}}
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+
+        let reinject = read_command(&mut socket);
+        assert_eq!(reinject["params"]["expression"], "bootstrap();");
+        socket
+            .send(Message::Text(
+                json!({
+                    "id": reinject["id"],
+                    "result": {"result": {"type": "undefined"}}
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+
+        let healthy = read_command(&mut socket);
+        socket
+            .send(Message::Text(
+                json!({
+                    "id": healthy["id"],
+                    "result": {
+                        "result": {
+                            "type": "object",
+                            "value": {"ok": true, "provider": "grok_native"}
+                        }
+                    }
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+        socket.close(None).unwrap();
+    });
+
+    LoopbackCdpClient::default()
+        .install_bootstrap(&target(port), "bootstrap();", Duration::from_secs(1))
+        .unwrap();
+
+    server.join().unwrap();
+}
+
+#[test]
 fn cdp_protocol_errors_fail_closed_instead_of_claiming_injection() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -211,6 +289,77 @@ fn ui_readiness_waits_until_the_native_renderer_has_interactive_content() {
 
     LoopbackCdpClient::default()
         .wait_for_ui_ready(&target(port), Duration::from_secs(1))
+        .unwrap();
+
+    server.join().unwrap();
+}
+
+#[test]
+fn provider_readiness_fails_closed_when_the_app_server_did_not_load_grok() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = accept(stream).unwrap();
+        let command = read_command(&mut socket);
+        let expression = command["params"]["expression"].as_str().unwrap();
+        assert!(expression.contains("config/read"));
+        assert!(expression.contains("grok_native"));
+        socket
+            .send(Message::Text(
+                json!({
+                    "id": command["id"],
+                    "result": {
+                        "result": {
+                            "type": "object",
+                            "value": {
+                                "ok": false,
+                                "error": "model provider 'grok_native' not found"
+                            }
+                        }
+                    }
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+    });
+
+    let error = LoopbackCdpClient::default()
+        .wait_for_provider_ready(&target(port), Duration::from_secs(1))
+        .unwrap_err();
+
+    assert!(error.to_string().contains("grok_native"));
+    server.join().unwrap();
+}
+
+#[test]
+fn provider_readiness_accepts_only_the_loaded_grok_provider() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = accept(stream).unwrap();
+        let command = read_command(&mut socket);
+        socket
+            .send(Message::Text(
+                json!({
+                    "id": command["id"],
+                    "result": {
+                        "result": {
+                            "type": "object",
+                            "value": {"ok": true, "provider": "grok_native"}
+                        }
+                    }
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+    });
+
+    LoopbackCdpClient::default()
+        .wait_for_provider_ready(&target(port), Duration::from_secs(1))
         .unwrap();
 
     server.join().unwrap();

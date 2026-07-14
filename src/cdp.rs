@@ -13,6 +13,7 @@ use tungstenite::{Message, WebSocket};
 use crate::DirectCdpTarget;
 
 const HEALTH_EXPRESSION: &str = "(() => { try { return window.__codexAdministrator?.health?.() ?? null; } catch { return null; } })()";
+const PROVIDER_READY_EXPRESSION: &str = include_str!("../assets/provider-readiness.js");
 const UI_READY_EXPRESSION: &str =
     "Boolean(document.body?.innerText?.trim() && document.querySelector('button'))";
 
@@ -77,8 +78,12 @@ impl LoopbackCdpClient {
 
         let deadline = Instant::now() + timeout;
         loop {
-            if health_is_ready(&session.evaluate(HEALTH_EXPRESSION)?) {
+            let health = session.evaluate(HEALTH_EXPRESSION)?;
+            if health_is_ready(&health) {
                 return Ok(());
+            }
+            if health.is_null() {
+                session.evaluate(script)?;
             }
             if Instant::now() >= deadline {
                 bail!("injected bridge did not become healthy before the deadline");
@@ -114,6 +119,25 @@ impl LoopbackCdpClient {
                     .min(deadline.saturating_duration_since(Instant::now())),
             );
         }
+    }
+
+    pub fn wait_for_provider_ready(
+        &self,
+        target: &DirectCdpTarget,
+        timeout: Duration,
+    ) -> Result<()> {
+        let port = target_port(target)?;
+        target.validate_for_port(port)?;
+        let mut session = CdpSession::connect(target, timeout.max(self.request_timeout))?;
+        let readiness = session.evaluate(PROVIDER_READY_EXPRESSION)?;
+        if health_is_ready(&readiness) {
+            return Ok(());
+        }
+        let error = readiness
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("model provider 'grok_native' did not become ready");
+        bail!("{error}")
     }
 
     fn get_json<T: serde::de::DeserializeOwned>(&self, port: u16, path: &str) -> Result<T> {

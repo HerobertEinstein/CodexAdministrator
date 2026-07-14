@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     ptr::{null, null_mut},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, bail};
@@ -39,7 +39,7 @@ use windows_sys::Win32::{
         },
         Threading::{
             CREATE_NEW_PROCESS_GROUP, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
-            OpenProcess, PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+            OpenProcess, PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
             QueryFullProcessImageNameW, ResumeThread, STARTUPINFOW, TerminateProcess,
             WaitForSingleObject,
         },
@@ -47,6 +47,8 @@ use windows_sys::Win32::{
 };
 
 const OFFICIAL_PACKAGE_FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
+const PROCESS_SYNCHRONIZE_ACCESS: u32 = 0x0010_0000;
+const DESCENDANT_QUIESCENCE_PASSES: usize = 40;
 
 use crate::{
     DirectCdpTarget, DirectIsolationContract, DirectRuntimeBackend, GrokNativeProviderConfig,
@@ -171,8 +173,8 @@ impl WindowsDirectRuntime {
             return Ok(());
         }
         reject_reparse_ancestors(&self.root)?;
-        let mut last_error = None;
-        for _ in 0..80 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
             match fs::remove_dir_all(&self.root) {
                 Ok(()) => {
                     self.owns_root = false;
@@ -183,17 +185,18 @@ impl WindowsDirectRuntime {
                     return Ok(());
                 }
                 Err(error) => {
-                    last_error = Some(error);
-                    thread::sleep(Duration::from_millis(25));
+                    if Instant::now() >= deadline {
+                        return Err(error).with_context(|| {
+                            format!(
+                                "failed to remove isolated instance root {}",
+                                self.root.display()
+                            )
+                        });
+                    }
+                    thread::sleep(Duration::from_millis(50));
                 }
             }
         }
-        Err(last_error.unwrap()).with_context(|| {
-            format!(
-                "failed to remove isolated instance root {}",
-                self.root.display()
-            )
-        })
     }
 }
 
@@ -310,6 +313,14 @@ impl DirectRuntimeBackend for WindowsDirectRuntime {
         self.cdp.wait_for_ui_ready(target, timeout)
     }
 
+    fn wait_for_provider_ready(
+        &mut self,
+        target: &DirectCdpTarget,
+        timeout: Duration,
+    ) -> Result<()> {
+        self.cdp.wait_for_provider_ready(target, timeout)
+    }
+
     fn injection_healthy(&mut self, target: &DirectCdpTarget) -> Result<bool> {
         self.cdp.injection_healthy(target)
     }
@@ -336,6 +347,7 @@ impl Drop for WindowsDirectRuntime {
 struct OwnedJob {
     handle: HANDLE,
     process_handles: Vec<HANDLE>,
+    launched_pids: BTreeSet<u32>,
 }
 
 impl OwnedJob {
@@ -364,6 +376,7 @@ impl OwnedJob {
         Ok(Self {
             handle,
             process_handles: Vec::new(),
+            launched_pids: BTreeSet::new(),
         })
     }
 
@@ -433,6 +446,7 @@ impl OwnedJob {
         unsafe {
             CloseHandle(process.hThread);
         }
+        self.launched_pids.insert(process.dwProcessId);
         self.process_handles.push(process.hProcess);
         Ok(())
     }
@@ -469,12 +483,24 @@ impl OwnedJob {
     }
 
     fn terminate(mut self) -> Result<()> {
+        let mut lineage = self.launched_pids.clone();
+        let mut descendants = BTreeMap::new();
+        let initial_capture = capture_descendant_handles(&mut lineage, &mut descendants);
         let terminated = unsafe { TerminateJobObject(self.handle, 0) };
         let terminate_error = if terminated == 0 {
             Some(std::io::Error::last_os_error())
         } else {
             None
         };
+        let descendant_error = initial_capture
+            .and_then(|_| {
+                terminate_descendant_lineage(
+                    &mut lineage,
+                    &mut descendants,
+                    Duration::from_secs(10),
+                )
+            })
+            .err();
         for handle in self.process_handles.drain(..) {
             unsafe {
                 WaitForSingleObject(handle, 5000);
@@ -485,10 +511,14 @@ impl OwnedJob {
             CloseHandle(self.handle);
         }
         self.handle = null_mut();
-        if let Some(error) = terminate_error {
-            return Err(error).context("failed to terminate owned Windows job");
+        match (terminate_error, descendant_error) {
+            (None, None) => Ok(()),
+            (Some(error), None) => Err(error).context("failed to terminate owned Windows job"),
+            (None, Some(error)) => Err(error),
+            (Some(job), Some(descendants)) => Err(anyhow::anyhow!(
+                "failed to terminate owned Windows job: {job}; descendant cleanup failed: {descendants}"
+            )),
         }
-        Ok(())
     }
 }
 
@@ -497,8 +527,15 @@ impl Drop for OwnedJob {
         if self.handle.is_null() {
             return;
         }
+        let mut lineage = self.launched_pids.clone();
+        let mut descendants = BTreeMap::new();
+        let _ = capture_descendant_handles(&mut lineage, &mut descendants);
         unsafe {
             TerminateJobObject(self.handle, 0);
+        }
+        let _ =
+            terminate_descendant_lineage(&mut lineage, &mut descendants, Duration::from_secs(5));
+        unsafe {
             for handle in self.process_handles.drain(..) {
                 CloseHandle(handle);
             }
@@ -506,6 +543,100 @@ impl Drop for OwnedJob {
         }
         self.handle = null_mut();
     }
+}
+
+struct CaptureOutcome {
+    added: usize,
+    inaccessible: BTreeSet<u32>,
+}
+
+fn capture_descendant_handles(
+    lineage: &mut BTreeSet<u32>,
+    handles: &mut BTreeMap<u32, HANDLE>,
+) -> Result<CaptureOutcome> {
+    let entries = snapshot_process_entries()?;
+    let pairs = entries
+        .iter()
+        .map(|entry| (entry.pid, entry.parent_pid))
+        .collect::<Vec<_>>();
+    *lineage = descendant_process_ids(&pairs, lineage);
+    let current = entries
+        .iter()
+        .map(|entry| entry.pid)
+        .filter(|pid| lineage.contains(pid))
+        .collect::<BTreeSet<_>>();
+    let mut added = 0;
+    let mut inaccessible = BTreeSet::new();
+    for pid in current {
+        if handles.contains_key(&pid) {
+            continue;
+        }
+        let handle = unsafe {
+            OpenProcess(
+                PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE_ACCESS,
+                0,
+                pid,
+            )
+        };
+        if handle.is_null() {
+            inaccessible.insert(pid);
+        } else {
+            handles.insert(pid, handle);
+            added += 1;
+        }
+    }
+    Ok(CaptureOutcome {
+        added,
+        inaccessible,
+    })
+}
+
+fn terminate_descendant_lineage(
+    lineage: &mut BTreeSet<u32>,
+    handles: &mut BTreeMap<u32, HANDLE>,
+    timeout: Duration,
+) -> Result<()> {
+    let result = (|| {
+        let deadline = Instant::now() + timeout;
+        let mut stable_empty_passes = 0;
+        loop {
+            let capture = capture_descendant_handles(lineage, handles)?;
+            for handle in handles.values().copied() {
+                if unsafe { WaitForSingleObject(handle, 0) } != WAIT_OBJECT_0 {
+                    unsafe {
+                        TerminateProcess(handle, 0);
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(50));
+            let live = handles
+                .iter()
+                .filter_map(|(pid, handle)| {
+                    (unsafe { WaitForSingleObject(*handle, 0) } != WAIT_OBJECT_0).then_some(*pid)
+                })
+                .collect::<BTreeSet<_>>();
+            if live.is_empty() && capture.added == 0 && capture.inaccessible.is_empty() {
+                stable_empty_passes += 1;
+                if stable_empty_passes >= DESCENDANT_QUIESCENCE_PASSES {
+                    return Ok(());
+                }
+            } else {
+                stable_empty_passes = 0;
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "owned descendant cleanup timed out; live={live:?}; inaccessible={:?}",
+                    capture.inaccessible
+                );
+            }
+        }
+    })();
+    for (_, handle) in std::mem::take(handles) {
+        unsafe {
+            CloseHandle(handle);
+        }
+    }
+    result
 }
 
 fn cleanup_failed_process(error: anyhow::Error, process: PROCESS_INFORMATION) -> anyhow::Error {
@@ -527,7 +658,13 @@ fn cleanup_failed_process(error: anyhow::Error, process: PROCESS_INFORMATION) ->
     }
 }
 
-fn snapshot_processes_named(name: &str) -> Result<BTreeSet<u32>> {
+struct ProcessSnapshotEntry {
+    pid: u32,
+    parent_pid: u32,
+    executable: OsString,
+}
+
+fn snapshot_process_entries() -> Result<Vec<ProcessSnapshotEntry>> {
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     if snapshot == INVALID_HANDLE_VALUE {
         return Err(std::io::Error::last_os_error())
@@ -537,7 +674,7 @@ fn snapshot_processes_named(name: &str) -> Result<BTreeSet<u32>> {
         dwSize: size_of::<PROCESSENTRY32W>() as u32,
         ..Default::default()
     };
-    let mut pids = BTreeSet::new();
+    let mut entries = Vec::new();
     let mut available = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
     while available {
         let length = entry
@@ -546,9 +683,11 @@ fn snapshot_processes_named(name: &str) -> Result<BTreeSet<u32>> {
             .position(|value| *value == 0)
             .unwrap_or(entry.szExeFile.len());
         let executable = OsString::from_wide(&entry.szExeFile[..length]);
-        if executable.to_string_lossy().eq_ignore_ascii_case(name) {
-            pids.insert(entry.th32ProcessID);
-        }
+        entries.push(ProcessSnapshotEntry {
+            pid: entry.th32ProcessID,
+            parent_pid: entry.th32ParentProcessID,
+            executable,
+        });
         available = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
     }
     let last_error = std::io::Error::last_os_error();
@@ -558,7 +697,35 @@ fn snapshot_processes_named(name: &str) -> Result<BTreeSet<u32>> {
     if last_error.raw_os_error() != Some(ERROR_NO_MORE_FILES as i32) {
         return Err(last_error).context("failed while enumerating Windows processes");
     }
-    Ok(pids)
+    Ok(entries)
+}
+
+fn snapshot_processes_named(name: &str) -> Result<BTreeSet<u32>> {
+    Ok(snapshot_process_entries()?
+        .into_iter()
+        .filter(|entry| {
+            entry
+                .executable
+                .to_string_lossy()
+                .eq_ignore_ascii_case(name)
+        })
+        .map(|entry| entry.pid)
+        .collect())
+}
+
+fn descendant_process_ids(entries: &[(u32, u32)], roots: &BTreeSet<u32>) -> BTreeSet<u32> {
+    let mut descendants = roots.clone();
+    loop {
+        let previous_len = descendants.len();
+        for &(pid, parent_pid) in entries {
+            if pid != 0 && pid != parent_pid && descendants.contains(&parent_pid) {
+                descendants.insert(pid);
+            }
+        }
+        if descendants.len() == previous_len {
+            return descendants;
+        }
+    }
 }
 
 fn process_image_path(pid: u32) -> Option<PathBuf> {
@@ -804,6 +971,7 @@ fn windows_environment_block(overrides: &[(OsString, OsString)]) -> Result<Vec<u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{fs::OpenOptions, os::windows::fs::OpenOptionsExt};
     use windows_sys::Win32::{
         Foundation::STILL_ACTIVE,
         System::Threading::{GetExitCodeProcess, PROCESS_QUERY_LIMITED_INFORMATION},
@@ -828,6 +996,43 @@ mod tests {
             CloseHandle(handle);
         }
         read && exit_code == STILL_ACTIVE as u32
+    }
+
+    #[test]
+    fn owned_root_cleanup_waits_for_a_late_child_file_release() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("instance");
+        fs::create_dir(&root).unwrap();
+        let held_path = root.join("state.lock");
+        fs::write(&held_path, b"held").unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&held_path)
+            .unwrap();
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(2_250));
+            drop(held);
+        });
+        let mut runtime = WindowsDirectRuntime::new(root.clone(), None).unwrap();
+        runtime.owns_root = true;
+
+        let started = Instant::now();
+        runtime.remove_owned_root().unwrap();
+
+        release.join().unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(2_000));
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn escaped_process_cleanup_tracks_the_full_descendant_tree() {
+        let entries = [(20, 10), (30, 20), (40, 30), (50, 999), (60, 50)];
+
+        assert_eq!(
+            descendant_process_ids(&entries, &BTreeSet::from([10])),
+            BTreeSet::from([10, 20, 30, 40])
+        );
     }
 
     #[test]

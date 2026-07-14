@@ -48,6 +48,7 @@ struct FakeState {
     healthy: bool,
     fail_health: bool,
     fail_target_wait: bool,
+    fail_provider_ready: bool,
     shutdowns: usize,
 }
 
@@ -65,6 +66,7 @@ impl FakeRuntime {
                 healthy: true,
                 fail_health: false,
                 fail_target_wait: false,
+                fail_provider_ready: false,
                 shutdowns: 0,
             })),
         }
@@ -185,6 +187,19 @@ impl DirectRuntimeBackend for FakeRuntime {
         Ok(())
     }
 
+    fn wait_for_provider_ready(
+        &mut self,
+        target: &DirectCdpTarget,
+        _timeout: Duration,
+    ) -> Result<()> {
+        let mut state = self.state.lock().unwrap();
+        state.events.push(format!("provider:{}", target.id));
+        if state.fail_provider_ready {
+            bail!("model provider 'grok_native' not found");
+        }
+        Ok(())
+    }
+
     fn injection_healthy(&mut self, target: &DirectCdpTarget) -> Result<bool> {
         let mut state = self.state.lock().unwrap();
         state.events.push(format!("health:{}", target.id));
@@ -234,6 +249,7 @@ fn starts_the_owned_instance_in_two_stages_before_installing_the_bootstrap() {
             "snapshot",
             "inject:initial",
             "ui:initial",
+            "provider:initial",
         ]
     );
     drop(instance);
@@ -440,6 +456,29 @@ fn a_missing_target_during_startup_cleans_the_owned_runtime() {
             .iter()
             .any(|event| event.starts_with("inject:"))
     );
+}
+
+#[test]
+fn an_unresolved_native_provider_fails_closed_before_ready() {
+    let runtime = FakeRuntime::new(
+        BTreeSet::from([100]),
+        BTreeSet::from([100, 400]),
+        BTreeSet::from([400]),
+    );
+    runtime.state.lock().unwrap().fail_provider_ready = true;
+    let observer = runtime.clone();
+
+    let error = DirectInstance::start(
+        contract(),
+        "bootstrap();".into(),
+        runtime,
+        Duration::from_secs(1),
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("grok_native"));
+    assert!(observer.events().contains(&"provider:initial".into()));
+    assert_eq!(observer.shutdowns(), 1);
 }
 
 #[test]

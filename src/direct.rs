@@ -143,6 +143,12 @@ pub trait DirectRuntimeBackend {
 
     fn wait_for_ui_ready(&mut self, target: &DirectCdpTarget, timeout: Duration) -> Result<()>;
 
+    fn wait_for_provider_ready(
+        &mut self,
+        target: &DirectCdpTarget,
+        timeout: Duration,
+    ) -> Result<()>;
+
     fn injection_healthy(&mut self, target: &DirectCdpTarget) -> Result<bool>;
 
     fn shutdown(&mut self) -> Result<()>;
@@ -203,6 +209,7 @@ impl<B: DirectRuntimeBackend> DirectInstance<B> {
             verify_runtime(&contract, &preexisting_pids, &mut backend, &target)?;
             backend.install_bootstrap(&target, &bootstrap, timeout)?;
             backend.wait_for_ui_ready(&target, timeout)?;
+            backend.wait_for_provider_ready(&target, timeout)?;
             Ok((preexisting_pids, target))
         })();
 

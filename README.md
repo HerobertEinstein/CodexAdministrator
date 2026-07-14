@@ -45,14 +45,19 @@ support in the official desktop application.
   verifies the suspended image and official package family, assigns each child
   to a Windows Job Object before resuming it, performs the required two-stage
   launch, proves the CDP listener PID belongs to that Job, waits for bridge and
-  UI readiness, tolerates bounded renderer-reload transitions, monitors
-  reinjection, rejects reparse-point ancestors, and removes only its instance
-  root during shutdown.
-- A fresh official-desktop E2E on `OpenAI.Codex 26.707.8479.0` preserved the
-  native GPT list, appended Grok once, selected Grok through the native menu,
-  restored GPT-5.4, recovered after a renderer reload and transient health
-  disconnect, preserved all eight daily processes, and left no isolated process
-  or profile residue.
+  UI readiness, requires the official app-server `config/read` response to
+  contain `model_providers.grok_native`, tolerates bounded renderer-reload
+  transitions, monitors reinjection, rejects reparse-point ancestors, and
+  removes only its instance root during shutdown. Chromium receives
+  `--do-not-de-elevate` so its administrator relaunch retains the isolated
+  environment and provider credential.
+- Shutdown terminates the owned Job Object, captures descendant process lineage
+  for children that escaped Job containment, waits for a bounded quiescence
+  window, and retries instance-root removal for up to ten seconds.
+- A fresh official-desktop E2E on `OpenAI.Codex 26.707.9981.0` passed automatic
+  executable discovery, bridge and native UI readiness, native
+  `grok_native` provider readiness, daily-instance preservation, clean launcher
+  exit, and zero remaining owned processes or instance-root residue.
 - This implementation exists only on the feature branch. It is not released or
   deployed, and it has not been merged into the default branch.
 - The Codex++ adapter writes only an external user script. The shipped
@@ -60,6 +65,9 @@ support in the official desktop application.
   any stale project script is removed.
 - Model visibility does not prove text streaming, tools, files, images,
   structured output, cancellation, resume reliability, or feature parity.
+  Three final direct Responses probes returned HTTP 503, so complete text and
+  tool parity remain explicitly unclaimed until the configured upstream passes
+  fresh capability-specific E2E.
 
 ## Provider Configuration
 

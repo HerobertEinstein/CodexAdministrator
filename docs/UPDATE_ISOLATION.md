@@ -32,10 +32,12 @@ or compatibility evidence.
 An unreviewed Codex++ update disables injection for that exact host identity.
 A Direct update must still pass the protected package path, suspended image
 and package-family checks, separate process tree, listener-PID ownership,
-isolated target, bridge health, and UI readiness gates. Failure
-terminates only the project Job Object and removes only the owned instance
-root. It does not block publisher startup or change native GPT behavior. A
-provider validation failure occurs before the isolated root is created.
+isolated target, bridge health, UI readiness, and official app-server provider
+readiness gates. Failure terminates only the project Job Object and captured
+descendant lineage, then removes only the owned instance root after a bounded
+retry. It does not block publisher startup or change native GPT behavior. A
+provider validation failure occurs before the isolated root is created; a
+runtime provider-readiness failure cleans the root instead of claiming success.
 
 ## Removal
 

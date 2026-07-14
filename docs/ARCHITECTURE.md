@@ -111,10 +111,24 @@ The launcher snapshots every pre-existing ChatGPT PID before startup and
 requires those PIDs to remain alive. It accepts only one
 `app://-/index.html` target from its own loopback port. The CDP client validates
 every command response, waits for bridge health and native UI readiness, and
-reinstalls the same idempotent bootstrap when a renderer reload clears it.
-Missing targets and renderer-health disconnects receive only a bounded recovery
-window; package, PID, listener ownership, and target-identity failures remain
-immediate fail-closed errors.
+reinstalls the same idempotent bootstrap when a renderer reload clears it. The
+launcher then sends the official app-server `config/read` request through the
+same renderer API and refuses readiness unless the returned configuration
+contains `model_providers.grok_native`.
+
+Each Chromium launch includes `--do-not-de-elevate`; without it, an
+administrator process may relaunch outside the isolated environment and lose
+the project-owned `CODEX_HOME` or credential environment variable. Missing
+targets and renderer-health disconnects receive only a bounded recovery window;
+package, PID, listener ownership, provider readiness, and target-identity
+failures remain immediate fail-closed errors.
+
+Shutdown first terminates the owned Job Object. It also captures the full
+descendant lineage of both launched roots, keeps handles for descendants that
+escape Job containment, and waits for two seconds of process-tree quiescence so
+late children cannot outlive their parent unnoticed. Process termination and
+instance-root deletion are bounded to ten seconds; errors are reported instead
+of deleting any broader path.
 
 The launcher proves that it passed the isolated profile argument and the
 current package E2E proves that this release honored it. It does not fabricate a
@@ -129,4 +143,6 @@ execution host.
 Seeing and selecting a model proves only model-list and routing behavior.
 Streaming, tools, files, images, structured output, reasoning controls,
 cancellation, and reliable resume are independent evidence gates. The project
-must not advertise any of them from model visibility alone.
+must not advertise any of them from model visibility alone. The latest three
+direct Responses probes returned HTTP 503, so text and tool parity remain
+unproven even though native provider registration and routing are ready.

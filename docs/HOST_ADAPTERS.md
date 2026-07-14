@@ -8,7 +8,7 @@ owns model execution or the native interface.
 The direct adapter is reserved for a project-owned isolated instance of the
 official desktop application. It may not reuse or activate the daily instance.
 
-A read-only probe of official package `OpenAI.Codex 26.707.8479.0` established
+A fresh live run of official package `OpenAI.Codex 26.707.9981.0` reconfirmed
 that a separate profile and loopback CDP port create a separate process tree.
 Starting the same isolated profile a second time with `--new-window` creates an
 `app://-/index.html` target on that isolated port. The official
@@ -26,15 +26,19 @@ The production Direct adapter is implemented. It:
   chain before creation, configuration writes, or removal;
 - creates each process suspended, assigns it to a Windows Job Object, and then
   resumes it;
+- passes `--do-not-de-elevate` so Chromium retains the isolated environment
+  across its administrator relaunch;
 - launches the background process and isolated window in two stages;
 - requires the loopback listener PID to belong to its Job Object and validates
   one `app://-/index.html` target on that port;
-- waits separately for bridge health and native UI readiness;
+- waits separately for bridge health and native UI readiness, then requires the
+  official app-server `config/read` result to contain `grok_native`;
 - installs Ctrl+C handling before any owned path or process is created;
 - checks every pre-existing daily PID during maintenance;
 - tolerates bounded target/health transitions and reinjects after renderer
   reload while preserving native GPT entries; and
-- terminates only its Job Object and deletes only its owned root on shutdown.
+- terminates only its Job Object plus captured descendant lineage, waits for a
+  bounded quiescence window, and deletes only its owned root on shutdown.
 
 `--no-launch` validates this plan without creating directories or processes.
 It uses the same protected system-`WindowsApps` launchability gate as a real
@@ -64,6 +68,6 @@ native.
 For Codex++, an upstream update changes the executable identity and disables
 the adapter until review. Direct uses the protected Windows package location,
 created-process image and package family, listener ownership, and runtime
-target, bridge, UI, and isolation gates; an incompatible update fails one of
-those gates and causes exact cleanup. Neither path blocks, replaces, pins, or
-modifies the publisher update.
+target, bridge, UI, native provider, and isolation gates; an incompatible
+update fails one of those gates and causes exact cleanup. Neither path blocks,
+replaces, pins, or modifies the publisher update.
