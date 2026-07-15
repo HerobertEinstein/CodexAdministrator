@@ -54,11 +54,46 @@ preservation, and zero owned process/profile residue. Scoped CDP tests prove
 startup reinjection after a renderer reset. Separate Windows tests prove
 runtime-persistent escaped-descendant lineage tracking, orphan discovery after
 an intermediate parent exits, multi-generation PID tracking, entry-order retry,
-generation-time rejection of reused or post-snapshot PIDs, permanent
-fail-closed vanished/inaccessible uncertainty, termination of already tracked
-handles when process snapshots fail, persistent reporting of transient
-snapshot failures, and a late file-release retry beyond the former two-second
-limit. These gates do not prove endpoint feature parity.
+generation-time rejection of reused or post-snapshot PIDs, a second-snapshot
+presence check after process-open failure, permanent fail-closed uncertainty
+only for candidates still present but inaccessible, temporary lineage
+anchors for vanished or reused PIDs, transitive observation for every visible
+descendant of those anchors, termination of already tracked handles when process
+snapshots fail, persistent reporting of transient snapshot failures, five
+continuous seconds of empty descendant captures, strict deadline enforcement,
+backward-clock rejection, and a late file-release retry beyond the former
+two-second limit. A visible anchored chain refreshes the observation window and
+promotes its visible descendants to temporary lineage members. That preserves
+taint across an intermediate member's exit. PPID edges from main snapshots and
+process-open rechecks remain available for the same five-second window, so the
+next capture can reconnect a surviving grandchild through an exited member.
+Historical edges do not prove presence: only current main/recheck snapshot PIDs
+refresh the window, and expired state is pruned before capture input export. A known-parent child with ambiguous generation is retained as
+a visible temporary anchor/member without being terminated from that relation. A
+persistent chain causes fail-closed timeout; a chain that disappears is not a
+permanent error by itself. Replacement processes are never tracked or
+terminated. Snapshot FILETIME must remain monotonic across main and recheck
+captures. This is bounded repeated-snapshot lineage monitoring, not a kernel
+process-creation trace. These gates do not prove endpoint feature parity.
+
+An external broker can start official plugin-sync helpers without an owned PPID
+chain. Direct therefore queries process command lines through the native Windows
+process-information API during shutdown and before each root-removal attempt.
+Only root-contained executables or supported Git, PowerShell, and Chromium
+path-argument syntax can match; arbitrary executables, `--`, and command/message
+payloads cannot. Multiple Git `-C` options resolve to one final cwd, while
+drive roots remain absolute and repeated Git path options use their final value.
+Relative Git path options require a proved final `-C` cwd; an unknown initial cwd
+does not match.
+The queried image selects the parser; command-line `argv[0]` is not image
+evidence. The first handle requests query rights only; termination plus
+synchronization use a separate handle, and both
+must report the same creation time. Unreadable processes without an exact match
+do not widen ownership; termination-right or identity failure after a match is
+fail-closed. Query-only liveness uses `GetExitCodeProcess`, not exit-time fields.
+Shutdown and Drop include the initial scan in one ten-second
+deadline; root scanning, process wait, and deletion share a separate ten-second
+deadline.
 
 A follow-up live run on the same official package used exact model `grok-4.5`.
 The official rollout recorded native text, an `update_plan` function call, its
@@ -69,6 +104,12 @@ listener, owned processes, and instance root exactly.
 The final generation-safe natural-timeout run preserved all eleven daily
 ChatGPT processes present at launch and again left no owned process, listener,
 instance root, or stderr output.
+
+A later official-desktop shell run routed exact `grok-4.5` through
+`grok_native`, recorded one completed PowerShell `commandExecution` with output
+`HEBOX_DESKTOP_SHELL_TOOL_OK` and exit code `0`, and returned final text
+`HEBOX_DESKTOP_SHELL_FINAL_OK`. Natural timeout preserved all eleven daily PIDs
+and left no process, listener, instance root, or stderr residue.
 
 Message-level tests are necessary but do not satisfy this desktop gate.
 
@@ -89,6 +130,8 @@ structured output, reasoning controls, cancellation, resume reliability, and
 any additional native feature. Unsupported or unknown behavior remains
 unclaimed without changing the host's existing providers. For the exact
 `grok-4.5` model and configured endpoint, public Responses streaming, native
-app-server text, and one `update_plan` function-call/output loop have passed.
-Other tools and modalities remain unclaimed. The distinct `grok-4.5-cli` alias
-currently returns HTTP 503 from its upstream distributor.
+app-server text, one `update_plan` function-call/output loop, and one native
+shell `commandExecution` loop have passed. Files, images, parallel tools,
+structured output, cancellation, resume reliability, and complete parity remain
+unclaimed. The distinct `grok-4.5-cli` alias currently returns HTTP 503 from its
+upstream distributor.

@@ -39,9 +39,33 @@ The production Direct adapter is implemented. It:
   reload while preserving native GPT entries; and
 - refreshes descendant lineage during every maintenance pass, then terminates
   only its Job Object plus `(PID, creation time)`-pinned descendants; entry
-  ordering is retried, while PID reuse, vanished/inaccessible candidates, and
-  snapshot failures become permanent fail-closed uncertainty; and shutdown
-  deletes only its owned root.
+  ordering is retried, process-open failure is checked against a second system
+  snapshot, a still-present inaccessible candidate and snapshot failure remain
+  permanent fail-closed uncertainty, and a vanished candidate or PID
+  reused after the snapshot becomes a temporary lineage anchor without tracking
+  or terminating the replacement; visible descendants become temporary lineage
+  members, while main and process-open-recheck PPID edges remain available for
+  five seconds. Historical edges preserve topology but do not establish current
+  presence; expired state is pruned before export and only current snapshot PIDs
+  refresh the window. A current child with
+  a known parent PID but ambiguous generation becomes a visible temporary
+  anchor/member and is not terminated from that ambiguous edge. The chain
+  refreshes the anchor window and causes fail-closed timeout if it persists.
+  Shutdown requires five continuous seconds of empty descendant captures and
+  anchor observation, rejects backward time within or across snapshots and
+  deadline overruns, and deletes only its owned root. Its ten-second absolute
+  budget begins before the initial global scan. External broker helpers without
+  owned ancestry are included only when a root-contained executable or supported
+  Git, PowerShell, or Chromium path argument identifies the exact root. Git `-C`
+  resolves cumulatively to the final cwd, drive roots stay absolute, and repeated
+  Git path options use their final values. The queried image selects the parser;
+  relative path options require a proved final `-C` cwd. Command-line `argv[0]`
+  is not image evidence. The first handle has query rights
+  only, while termination and
+  synchronization use a separate handle with the same creation time; unreadable unmatched
+  processes do not widen ownership, while post-match termination/identity failure
+  is fail-closed. Query-only liveness uses `GetExitCodeProcess`. Root scan, process wait, and deletion share one separate
+  ten-second deadline.
 
 `--no-launch` validates this plan without creating directories or processes.
 It uses the same protected system-`WindowsApps` launchability gate as a real

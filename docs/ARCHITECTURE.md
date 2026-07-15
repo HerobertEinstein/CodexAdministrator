@@ -155,5 +155,46 @@ cancellation, and reliable resume are independent evidence gates. The project
 must not advertise any of them from model visibility alone. Exact-model live
 evidence for `grok-4.5` proves a valid public Responses stream, a native
 app-server thread and text turn, and one `update_plan` function-call/output
-round trip. It does not prove other tools or modalities. `grok-4.5-cli` is a
-different alias and currently fails upstream with HTTP 503.
+round trip. A later isolated official-desktop run also proves one native shell
+`commandExecution` with observed output and exit code `0`. It does not prove
+files, images, parallel tools, structured output, cancellation, reliable
+resume, or complete parity. `grok-4.5-cli` is a different alias and currently
+fails upstream with HTTP 503.
+
+Direct descendant cleanup uses bounded repeated process snapshots rather than a
+kernel process-creation trace. A process-open failure is rechecked against a
+second system snapshot before it can become permanent uncertainty. Vanished or
+post-snapshot reused PIDs are retained as temporary lineage anchors for the
+five-second quiescence window. Their
+replacement process is never terminated; any visible transitive descendant from
+an active anchor refreshes that observation window and becomes a temporary
+lineage member. This preserves taint when an intermediate member exits but a
+grandchild survives. PPID edges from main snapshots and process-open rechecks
+remain in a five-second lineage history, allowing later captures to reconnect
+through an exited member. Historical edges establish topology only; a PID must
+also be visible in the current main/recheck snapshot to refresh the window, and
+expired anchors/members/edges are pruned before capture inputs are exported. A
+current child with a known parent PID but ambiguous generation becomes a visible
+temporary anchor/member and is not terminated from that ambiguous relation.
+Cleanup fails closed if the chain persists, while a
+chain that disappears still requires five continuous empty seconds. Clock
+rollback within or across snapshots, parent-exit timestamp equality, and cleanup
+completion after the strict deadline are rejected. Explicit shutdown and Drop
+start one ten-second absolute deadline before their initial global scan.
+
+PPID lineage is not the only ownership signal during shutdown. Official plugin
+sync may be spawned by an external broker, so Direct also uses
+`NtQueryInformationProcess(ProcessCommandLineInformation)` on current process
+handles. It matches only an executable already inside the root or supported Git,
+PowerShell, and Chromium path-argument grammar; arbitrary root text, `--`, and
+command/message payloads do not match. Git `-C` options are accumulated to the
+final cwd, drive roots stay absolute, and repeated Git path options use their
+final values. Relative path options resolve only against a proved final `-C` cwd.
+The queried image selects the parser; command-line `argv[0]` is
+never image evidence. Query
+uses only `PROCESS_QUERY_LIMITED_INFORMATION`; termination and synchronization
+rights use a separate handle, and creation time must match before termination.
+Query-only liveness uses `GetExitCodeProcess`. Supported broker query
+failures without an exact match do not widen ownership; after an exact match,
+termination-right or identity failure is fail-closed. The same scan and process wait share the
+owned-root removal's ten-second absolute deadline.

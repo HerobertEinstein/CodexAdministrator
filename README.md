@@ -56,10 +56,46 @@ support in the official desktop application.
   containment. A child is owned only when its creation falls inside a tracked
   parent generation and no later than the process snapshot. Multiple
   generations of one PID remain distinct, and mismatched child entries retry
-  after later parent entries. Inaccessible, vanished, or post-snapshot reused
-  PIDs become permanent fail-closed uncertainty instead of widening ownership.
-  Shutdown terminates the Job Object plus every tracked handle; any snapshot
-  failure remains an error even if a later retry succeeds.
+  after later parent entries. If a fixed point still has a current child whose
+  parent PID is known but whose generation cannot be proved, that child becomes
+  a visible temporary lineage anchor/member: it is never terminated from the
+  ambiguous edge, but cleanup remains fail-closed while it is visible. An open
+  failure is checked against a second system
+  snapshot; only a PID still present but inaccessible becomes permanent
+  fail-closed uncertainty. A candidate that vanished before opening,
+  or whose PID was reused after the snapshot, becomes a temporary lineage anchor:
+  the replacement PID is never tracked or terminated. Any visible process chain
+  rooted at that PID keeps the anchor observation window active, and each visible
+  descendant is promoted to a temporary lineage member so its children remain
+  tainted after an intermediate process exits. PPID edges from main snapshots
+  and open-failure rechecks are retained for the same five-second window, closing
+  gaps between consecutive captures. Historical edges provide topology only;
+  expired state is pruned before capture inputs are exported, and only PIDs
+  visible in the current main/recheck snapshot refresh the window.
+  Cleanup fails closed if the chain persists,
+  but a chain that disappears must still be followed by five continuous empty
+  seconds. Shutdown terminates the Job Object plus every tracked handle. Because
+  official plugin sync may be launched by an external broker with no owned PPID
+  ancestry, shutdown also reads process command lines natively. It accepts only
+  an executable inside the root or supported Git, PowerShell, and Chromium path
+  syntax; `--`, command/message payloads, and arbitrary executables do not match.
+  Multiple Git `-C` arguments are resolved cumulatively, drive roots remain
+  absolute, and repeated Git path options use only their final values. Relative
+  Git path options resolve against a proved final `-C` cwd; an unknown initial cwd
+  does not widen ownership.
+  Command-line `argv[0]` never selects the parser or substitutes for the queried
+  image path.
+  The scanner first opens a query-only, non-synchronizing current-generation handle, then acquires a
+  separate termination handle only after an exact-root match and verifies the
+  creation time again. Once matched, termination-right or identity failure is
+  fail-closed; an unreadable process that never yielded ownership evidence is
+  not widened into ownership. Query-handle liveness uses
+  `GetExitCodeProcess`, not a running process's exit timestamp.
+  Root deletion repeats that scan under one ten-second absolute deadline; the
+  same ten-second shutdown budget includes its initial global scan and the
+  five-second quiescence window. A
+  snapshot failure, backward clock within or across snapshots, or strict cleanup
+  deadline overrun remains an error even if a later retry succeeds.
 - A fresh official-desktop E2E on `OpenAI.Codex 26.707.9981.0` passed automatic
   executable discovery, bridge and native UI readiness, native
   `grok_native` provider readiness, daily-instance preservation, clean launcher
@@ -72,6 +108,12 @@ support in the official desktop application.
 - The final generation-safe cleanup run also exited naturally with empty
   stderr, preserved all eleven processes present in the daily ChatGPT tree at
   launch, and left zero owned process, listener, or instance-root residue.
+- A later isolated official-desktop run proved one native shell-tool loop for
+  exact `grok-4.5`: the routed thread reported `modelProvider = grok_native`,
+  its stored turn contained one completed `commandExecution`, PowerShell printed
+  `HEBOX_DESKTOP_SHELL_TOOL_OK` with exit code `0`, and the final agent message
+  was `HEBOX_DESKTOP_SHELL_FINAL_OK`. Natural timeout preserved all eleven daily
+  PIDs and left zero process, listener, instance-root, or stderr residue.
 - This implementation exists only on the feature branch. It is not released or
   deployed, and it has not been merged into the default branch.
 - The Codex++ adapter writes only an external user script. The shipped
@@ -80,8 +122,8 @@ support in the official desktop application.
 - Model visibility does not prove text streaming, tools, files, images,
   structured output, cancellation, resume reliability, or feature parity.
   A live exact-model E2E now proves public Responses streaming and native
-  ChatGPT/Codex app-server text for `grok-4.5`, plus one `update_plan` function
-  call and matching `function_call_output`. Files, images, shell tools, parallel
+  ChatGPT/Codex app-server text for `grok-4.5`, one `update_plan` function-call
+  loop, and one native shell `commandExecution` loop. Files, images, parallel
   tools, structured output, cancellation, resume reliability, and complete
   parity remain unclaimed. The separate `grok-4.5-cli` alias currently returns
   HTTP 503 because its upstream distributor has no available channel.

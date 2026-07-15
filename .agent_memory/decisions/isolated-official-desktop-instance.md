@@ -2,7 +2,7 @@
 type: constraint
 status: active
 created: 2026-07-13
-updated: 2026-07-14
+updated: 2026-07-15
 scope: project
 paths:
   - assets/renderer-api-discovery.js
@@ -60,10 +60,50 @@ creation, writes, and removal reject reparse-point ancestors. Shutdown captures
 descendant lineage beyond Job containment during runtime maintenance, keeps
 escaped-child handles under `(PID, creation time)` identities after an
 intermediate parent exits, retries child entries after later parent generations,
-and rejects reused or post-snapshot PIDs. Vanished and inaccessible candidates
-become permanent OwnedJob uncertainty. Known handles are still terminated, but
-the first uncertainty or snapshot failure remains the final result. Exact-root
-removal remains bounded to ten seconds.
+and rejects reused or post-snapshot PIDs. A process-open failure triggers a
+second system snapshot; only a PID still present but inaccessible becomes
+permanent OwnedJob identity uncertainty.
+A candidate already gone before opening, or a replacement PID created at or
+after the snapshot boundary, becomes a temporary lineage anchor without opening
+or terminating the replacement. Every visible process chain rooted at an active
+anchor refreshes its observation window. Visible descendants are promoted to
+temporary lineage members, so a surviving grandchild remains tainted after its
+intermediate parent exits. Main-snapshot and process-open-recheck PPID edges are
+retained for five seconds, allowing a later snapshot to reconnect that surviving
+grandchild through the exited member. Historical edges provide topology only;
+expired state is pruned before capture inputs are exported, and only a PID visible
+in the current main/recheck snapshot refreshes the window. A
+fixed-point child with a known parent PID but ambiguous generation becomes a
+visible temporary anchor/member and is not terminated from that ambiguous edge.
+A persistent chain therefore times out
+fail-closed, while a chain that disappears must still be followed by five
+continuous empty seconds. Known handles are still terminated, the first true
+identity uncertainty or snapshot failure remains the final result, and shutdown
+requires five continuous seconds of empty descendant captures before exact-root
+removal. Backward time within or across snapshots, ambiguous parent-exit
+equality, and strict deadline overruns fail closed. Explicit shutdown and Drop
+use a ten-second absolute deadline that begins before the initial global scan,
+leaving bounded room for the five-second quiescence window. This is bounded
+repeated-snapshot monitoring, not a kernel process-creation trace.
+
+Official plugin sync can also arrive through an external broker and therefore
+have no owned PPID ancestry. Shutdown and every exact-root removal attempt query
+process command lines with native `NtQueryInformationProcess`. A process matches
+only when its executable is inside the root or supported Git, PowerShell, or
+Chromium path-argument grammar names the exact root. Arbitrary executables, `--`,
+and command/message payloads do not match. Multiple Git `-C` arguments resolve to
+the final cumulative cwd, drive roots remain absolute, and repeated Git path
+options use their final values. Relative path options resolve only against a
+proved final `-C` cwd; an unknown initial cwd does not widen ownership. The queried image selects the parser;
+command-line `argv[0]` never replaces image evidence. The scanner first uses a
+non-synchronizing query-only handle, opens
+termination/synchronization rights only after a match, and requires equal creation
+times. Unreadable processes without an exact match do not widen ownership;
+termination-right or identity failure after a match is fail-closed. Query-only
+liveness uses `GetExitCodeProcess`, not running-process exit timestamps. Root scan,
+termination wait, and deletion share one ten-second absolute deadline. This
+still covers isolated-root `git fetch` / `index-pack` helpers without
+generalizing to unrelated Git processes.
 
 The `grok-4.5` native app-server run recorded exact text, one `update_plan`
 function call and output, final text, and two completed tasks. Natural session
@@ -74,6 +114,13 @@ The final generation-safe natural-timeout run preserved all eleven daily
 ChatGPT processes present at launch and again left no launcher, listener, owned
 process, instance root, or stderr residue.
 
+The later r7 native shell run used a non-ephemeral thread only inside the
+isolated `CODEX_HOME`. Its stored turn contained one completed PowerShell
+`commandExecution`, output `HEBOX_DESKTOP_SHELL_TOOL_OK`, exit code `0`, and
+final text `HEBOX_DESKTOP_SHELL_FINAL_OK`. Natural timeout preserved all eleven
+daily PIDs and left no launcher, listener, owned process, instance root, or
+stderr residue.
+
 ## Use Next Time
 
 Keep every Direct launch behind the production process owner, two-stage
@@ -83,5 +130,7 @@ lifecycle, descendant-lineage cleanup, and exact owned-root removal. Never fall
 back to attaching or activating the daily instance. Do not confuse
 implementation or E2E evidence with a release, merge, deployment, or endpoint
 capability-parity claim. `grok-4.5` has exact live evidence for Responses text
-and one native `update_plan` tool loop; other tools/modalities remain unproven.
-The separate `grok-4.5-cli` alias currently returns upstream HTTP 503.
+plus one native `update_plan` loop and one native shell `commandExecution` loop.
+Files, images, parallel tools, structured output, cancellation, resume
+reliability, and complete parity remain unproven. The separate `grok-4.5-cli`
+alias currently returns upstream HTTP 503.
