@@ -57,8 +57,22 @@ belong to that Job, waits for bridge and UI readiness, and refuses ready unless
 the official app-server `config/read` response contains `grok_native`. It
 monitors reinjection with a bounded target/health recovery window. Instance
 creation, writes, and removal reject reparse-point ancestors. Shutdown captures
-descendant lineage beyond Job containment, waits for a quiescence window, and
-retries owned-root removal for up to ten seconds.
+descendant lineage beyond Job containment during runtime maintenance, keeps
+escaped-child handles under `(PID, creation time)` identities after an
+intermediate parent exits, retries child entries after later parent generations,
+and rejects reused or post-snapshot PIDs. Vanished and inaccessible candidates
+become permanent OwnedJob uncertainty. Known handles are still terminated, but
+the first uncertainty or snapshot failure remains the final result. Exact-root
+removal remains bounded to ten seconds.
+
+The `grok-4.5` native app-server run recorded exact text, one `update_plan`
+function call and output, final text, and two completed tasks. Natural session
+expiry preserved all eight daily PIDs and left no launcher, listener, owned
+process, or instance-root residue.
+
+The final generation-safe natural-timeout run preserved all eleven daily
+ChatGPT processes present at launch and again left no launcher, listener, owned
+process, instance root, or stderr residue.
 
 ## Use Next Time
 
@@ -68,5 +82,6 @@ CDP target monitor, UI and native provider readiness gates, bounded reinjection
 lifecycle, descendant-lineage cleanup, and exact owned-root removal. Never fall
 back to attaching or activating the daily instance. Do not confuse
 implementation or E2E evidence with a release, merge, deployment, or endpoint
-capability-parity claim. Three final direct Responses probes returned HTTP 503,
-so complete text and tool parity remain unproven.
+capability-parity claim. `grok-4.5` has exact live evidence for Responses text
+and one native `update_plan` tool loop; other tools/modalities remain unproven.
+The separate `grok-4.5-cli` alias currently returns upstream HTTP 503.

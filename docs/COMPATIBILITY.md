@@ -52,8 +52,23 @@ executable discovery, suspended official-package acceptance, listener PID
 ownership, bridge and UI readiness, native provider readiness, daily-instance
 preservation, and zero owned process/profile residue. Scoped CDP tests prove
 startup reinjection after a renderer reset. Separate Windows tests prove
-escaped-descendant lineage cleanup and a late file-release retry beyond the
-former two-second limit. These gates do not prove endpoint feature parity.
+runtime-persistent escaped-descendant lineage tracking, orphan discovery after
+an intermediate parent exits, multi-generation PID tracking, entry-order retry,
+generation-time rejection of reused or post-snapshot PIDs, permanent
+fail-closed vanished/inaccessible uncertainty, termination of already tracked
+handles when process snapshots fail, persistent reporting of transient
+snapshot failures, and a late file-release retry beyond the former two-second
+limit. These gates do not prove endpoint feature parity.
+
+A follow-up live run on the same official package used exact model `grok-4.5`.
+The official rollout recorded native text, an `update_plan` function call, its
+`function_call_output`, final text, and two completed tasks. Natural timeout
+then preserved all eight pre-existing daily PIDs and removed the launcher,
+listener, owned processes, and instance root exactly.
+
+The final generation-safe natural-timeout run preserved all eleven daily
+ChatGPT processes present at launch and again left no owned process, listener,
+instance root, or stderr output.
 
 Message-level tests are necessary but do not satisfy this desktop gate.
 
@@ -72,6 +87,8 @@ Model-list success is not feature parity. Each exact model and endpoint needs
 separate evidence for text streaming, tools, parallel tools, files, images,
 structured output, reasoning controls, cancellation, resume reliability, and
 any additional native feature. Unsupported or unknown behavior remains
-unclaimed without changing the host's existing providers. Three final direct
-Responses probes returned HTTP 503, so no complete text or tool capability is
-currently claimed.
+unclaimed without changing the host's existing providers. For the exact
+`grok-4.5` model and configured endpoint, public Responses streaming, native
+app-server text, and one `update_plan` function-call/output loop have passed.
+Other tools and modalities remain unclaimed. The distinct `grok-4.5-cli` alias
+currently returns HTTP 503 from its upstream distributor.

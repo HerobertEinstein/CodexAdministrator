@@ -51,13 +51,27 @@ support in the official desktop application.
   removes only its instance root during shutdown. Chromium receives
   `--do-not-de-elevate` so its administrator relaunch retains the isolated
   environment and provider credential.
-- Shutdown terminates the owned Job Object, captures descendant process lineage
-  for children that escaped Job containment, waits for a bounded quiescence
-  window, and retries instance-root removal for up to ten seconds.
+- Runtime maintenance continuously captures descendant process lineage and
+  keeps handles plus process creation/exit times for children that escape Job
+  containment. A child is owned only when its creation falls inside a tracked
+  parent generation and no later than the process snapshot. Multiple
+  generations of one PID remain distinct, and mismatched child entries retry
+  after later parent entries. Inaccessible, vanished, or post-snapshot reused
+  PIDs become permanent fail-closed uncertainty instead of widening ownership.
+  Shutdown terminates the Job Object plus every tracked handle; any snapshot
+  failure remains an error even if a later retry succeeds.
 - A fresh official-desktop E2E on `OpenAI.Codex 26.707.9981.0` passed automatic
   executable discovery, bridge and native UI readiness, native
   `grok_native` provider readiness, daily-instance preservation, clean launcher
   exit, and zero remaining owned processes or instance-root residue.
+- A subsequent exact-model run used `grok-4.5` through the same isolated native
+  app-server. Its rollout recorded `HEBOX_NATIVE_GROK_OK`, one `update_plan`
+  function call, the matching `function_call_output`, `HEBOX_TOOL_OK`, and two
+  completed tasks. Natural session expiry preserved all eight daily PIDs and
+  left zero launcher, listener, owned process, or instance-root residue.
+- The final generation-safe cleanup run also exited naturally with empty
+  stderr, preserved all eleven processes present in the daily ChatGPT tree at
+  launch, and left zero owned process, listener, or instance-root residue.
 - This implementation exists only on the feature branch. It is not released or
   deployed, and it has not been merged into the default branch.
 - The Codex++ adapter writes only an external user script. The shipped
@@ -65,9 +79,12 @@ support in the official desktop application.
   any stale project script is removed.
 - Model visibility does not prove text streaming, tools, files, images,
   structured output, cancellation, resume reliability, or feature parity.
-  Three final direct Responses probes returned HTTP 503, so complete text and
-  tool parity remain explicitly unclaimed until the configured upstream passes
-  fresh capability-specific E2E.
+  A live exact-model E2E now proves public Responses streaming and native
+  ChatGPT/Codex app-server text for `grok-4.5`, plus one `update_plan` function
+  call and matching `function_call_output`. Files, images, shell tools, parallel
+  tools, structured output, cancellation, resume reliability, and complete
+  parity remain unclaimed. The separate `grok-4.5-cli` alias currently returns
+  HTTP 503 because its upstream distributor has no available channel.
 
 ## Provider Configuration
 

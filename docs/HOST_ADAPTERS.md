@@ -37,8 +37,11 @@ The production Direct adapter is implemented. It:
 - checks every pre-existing daily PID during maintenance;
 - tolerates bounded target/health transitions and reinjects after renderer
   reload while preserving native GPT entries; and
-- terminates only its Job Object plus captured descendant lineage, waits for a
-  bounded quiescence window, and deletes only its owned root on shutdown.
+- refreshes descendant lineage during every maintenance pass, then terminates
+  only its Job Object plus `(PID, creation time)`-pinned descendants; entry
+  ordering is retried, while PID reuse, vanished/inaccessible candidates, and
+  snapshot failures become permanent fail-closed uncertainty; and shutdown
+  deletes only its owned root.
 
 `--no-launch` validates this plan without creating directories or processes.
 It uses the same protected system-`WindowsApps` launchability gate as a real

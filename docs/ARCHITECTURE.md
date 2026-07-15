@@ -123,12 +123,21 @@ targets and renderer-health disconnects receive only a bounded recovery window;
 package, PID, listener ownership, provider readiness, and target-identity
 failures remain immediate fail-closed errors.
 
-Shutdown first terminates the owned Job Object. It also captures the full
-descendant lineage of both launched roots, keeps handles for descendants that
-escape Job containment, and waits for two seconds of process-tree quiescence so
-late children cannot outlive their parent unnoticed. Process termination and
-instance-root deletion are bounded to ten seconds; errors are reported instead
-of deleting any broader path.
+Each runtime-maintenance pass refreshes the full descendant lineage of both
+launched roots and keeps process handles for descendants that escape Job
+containment. Each tracked handle pins one PID generation with its creation and
+exit times, keyed by `(PID, creation time)` so old and new generations can
+coexist. The snapshot upper bound is recorded before snapshot creation. A
+candidate is accepted only when its creation lies inside a trusted parent
+generation and no later than that bound. Child entries that match only an old
+generation remain pending while later parent entries may add a new generation.
+This preserves orphan discovery but rejects unrelated PID reuse. A candidate
+that is inaccessible, vanishes before opening, or was replaced after the
+snapshot becomes permanent OwnedJob uncertainty; later clean captures cannot
+erase it. Shutdown still terminates every known handle, but reports uncertainty
+instead of claiming full cleanup. Termination and exact-root deletion stay
+bounded to ten seconds; errors never authorize broader deletion or unrelated
+termination.
 
 The launcher proves that it passed the isolated profile argument and the
 current package E2E proves that this release honored it. It does not fabricate a
@@ -143,6 +152,8 @@ execution host.
 Seeing and selecting a model proves only model-list and routing behavior.
 Streaming, tools, files, images, structured output, reasoning controls,
 cancellation, and reliable resume are independent evidence gates. The project
-must not advertise any of them from model visibility alone. The latest three
-direct Responses probes returned HTTP 503, so text and tool parity remain
-unproven even though native provider registration and routing are ready.
+must not advertise any of them from model visibility alone. Exact-model live
+evidence for `grok-4.5` proves a valid public Responses stream, a native
+app-server thread and text turn, and one `update_plan` function-call/output
+round trip. It does not prove other tools or modalities. `grok-4.5-cli` is a
+different alias and currently fails upstream with HTTP 503.
