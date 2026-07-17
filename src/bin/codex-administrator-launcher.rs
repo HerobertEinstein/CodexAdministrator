@@ -87,7 +87,7 @@ mod windows_launcher {
         ) -> Result<LauncherChildOutcome> {
             let mut child = spawn_direct_launcher(
                 &self.child_executable,
-                generation.settings(),
+                generation.launch_settings(),
                 &self.instance_root,
                 generation.credential(),
                 generation.credential_present(),

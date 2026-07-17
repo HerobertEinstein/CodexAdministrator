@@ -2,8 +2,8 @@ use std::path::Path;
 
 use codex_administrator::{
     DiscoveredModel, LauncherSettings, PROVIDER_RUNTIME_ENV_KEY, RendererAddonSettings,
-    build_direct_launcher_arguments, environment_variable_is_sensitive, launcher_output_is_ready,
-    sanitize_launcher_diagnostic, spawn_direct_launcher,
+    SupervisorGeneration, build_direct_launcher_arguments, environment_variable_is_sensitive,
+    launcher_output_is_ready, sanitize_launcher_diagnostic, spawn_direct_launcher,
 };
 
 fn settings() -> LauncherSettings {
@@ -41,6 +41,7 @@ fn launcher_arguments_use_dynamic_selected_models_without_containing_the_secret(
         .join(" ");
 
     assert!(rendered.starts_with("inject --host direct"));
+    assert!(rendered.contains("--launcher-managed"));
     assert!(rendered.contains("--model grok-4.5"));
     assert!(rendered.contains("--model grok-4.3-high"));
     assert!(rendered.contains("--base-url https://example.com/v1"));
@@ -91,10 +92,14 @@ fn launcher_arguments_forward_an_editable_responses_action_path_without_touching
 
 #[test]
 fn launcher_arguments_allow_management_only_startup_without_selected_models() {
-    let settings = LauncherSettings::default();
+    let generation = SupervisorGeneration::new(LauncherSettings::default(), None).unwrap();
 
-    let args =
-        build_direct_launcher_arguments(&settings, Path::new(r"C:\isolated"), false).unwrap();
+    let args = build_direct_launcher_arguments(
+        generation.launch_settings(),
+        Path::new(r"C:\isolated"),
+        false,
+    )
+    .unwrap();
     let rendered = args
         .iter()
         .map(|argument| argument.to_string_lossy())

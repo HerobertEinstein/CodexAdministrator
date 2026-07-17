@@ -2,7 +2,7 @@
 type: decision
 status: active
 created: 2026-07-16
-updated: 2026-07-17
+updated: 2026-07-18
 scope: project
 paths:
   - src/native_state_sync.rs
@@ -19,10 +19,11 @@ verified_by:
 ## Summary
 
 The native model-selector manager synchronizes validated file-backed
-`auth.json` by default. Complete conversation import is a separate explicit
-opt-in because it copies prompts, messages, tool output, and environment
-history, can require several GB, and may send that history to the selected Grok
-provider when a thread is continued.
+`auth.json` by default. Managed launches also enable one-way incremental
+conversation import by default, with a visible opt-out, because manual import
+does not satisfy seamless task continuity. The import copies prompts, messages,
+tool output, and environment history, can require several GB, and may send that
+history to the selected Grok provider when a thread is continued.
 
 The daily read allowlist is exact: `auth.json`, `sessions/**/*.jsonl`,
 `archived_sessions/**/*.jsonl`, and `session_index.jsonl`. Never read or copy
@@ -53,7 +54,9 @@ newer parsed RFC3339 name wins and ties remain private.
 
 ## Use Next Time
 
-Keep complete conversation import disabled by default and retain the explicit
-privacy/space/provider warning. Do not broaden the daily read allowlist, share
-SQLite, copy daily configuration, or advertise resume parity without new tests
-and a real official app-server list/read/resume E2E.
+Keep complete conversation import enabled by default for managed launches while
+retaining the explicit privacy/space/provider warning and a visible opt-out.
+Synchronization remains one-way and incremental at launch. Do not broaden the
+daily read allowlist, share SQLite, copy daily configuration, or advertise
+resume parity without new tests and a real official app-server list/read/resume
+E2E.

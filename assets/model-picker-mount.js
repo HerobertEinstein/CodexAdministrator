@@ -402,7 +402,7 @@
       return { input, label };
     }
     const syncAuth = toggle("Sync native login", state.syncNativeAuth);
-    const syncSessions = toggle("Import native task snapshots", state.syncNativeSessions);
+    const syncSessions = toggle("Automatically sync native tasks on launch", state.syncNativeSessions);
     const syncGroup = documentRef.createElement("div");
     setStyles(syncGroup, { display: "flex", flexDirection: "column", gap: "9px" });
     syncGroup.append(syncAuth.label, syncSessions.label);

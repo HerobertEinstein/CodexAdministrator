@@ -164,13 +164,10 @@ fn rejected_apply_preserves_the_last_valid_in_memory_settings() {
     let temp = tempdir().unwrap();
     let settings_path = temp.path().join("settings.json");
     let store = MemoryCredentialStore::default();
-    let mut broker = GrokControlBroker::new(
-        NONCE,
-        LauncherSettings::default(),
-        false,
-        settings_path.clone(),
-    )
-    .unwrap();
+    let initial_settings = LauncherSettings::default();
+    let expected_sync_native_sessions = initial_settings.sync_native_sessions;
+    let mut broker =
+        GrokControlBroker::new(NONCE, initial_settings, false, settings_path.clone()).unwrap();
 
     let rejected = broker.handle(
         request(
@@ -210,7 +207,10 @@ fn rejected_apply_preserves_the_last_valid_in_memory_settings() {
         DEFAULT_GROK_ACTION_PATH
     );
     assert_eq!(state["result"]["model_picker"]["syncNativeAuth"], true);
-    assert_eq!(state["result"]["model_picker"]["syncNativeSessions"], false);
+    assert_eq!(
+        state["result"]["model_picker"]["syncNativeSessions"],
+        expected_sync_native_sessions
+    );
     assert_eq!(state["result"]["model_picker"]["rendererAddons"], json!([]));
 }
 
@@ -219,13 +219,10 @@ fn credential_write_failure_does_not_persist_settings_or_consume_the_pending_key
     let temp = tempdir().unwrap();
     let settings_path = temp.path().join("settings.json");
     let discovery_store = MemoryCredentialStore::default();
-    let mut broker = GrokControlBroker::new(
-        NONCE,
-        LauncherSettings::default(),
-        false,
-        settings_path.clone(),
-    )
-    .unwrap();
+    let initial_settings = LauncherSettings::default();
+    let expected_sync_native_sessions = initial_settings.sync_native_sessions;
+    let mut broker =
+        GrokControlBroker::new(NONCE, initial_settings, false, settings_path.clone()).unwrap();
 
     let discovered = broker.handle(
         request(
@@ -270,7 +267,10 @@ fn credential_write_failure_does_not_persist_settings_or_consume_the_pending_key
     );
     let state = state.response.into_value();
     assert_eq!(state["result"]["model_picker"]["syncNativeAuth"], true);
-    assert_eq!(state["result"]["model_picker"]["syncNativeSessions"], false);
+    assert_eq!(
+        state["result"]["model_picker"]["syncNativeSessions"],
+        expected_sync_native_sessions
+    );
 
     let working_store = MemoryCredentialStore::default();
     let applied = broker.handle(

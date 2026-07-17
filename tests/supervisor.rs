@@ -24,8 +24,9 @@ fn generation_enters_configured_mode_only_when_models_and_credential_exist() {
     settings.sync_native_sessions = true;
     let management = SupervisorGeneration::new(settings.clone(), None).unwrap();
     assert_eq!(management.mode(), SupervisorMode::ManagementOnly);
-    assert!(management.settings().selected_models.is_empty());
-    assert!(!management.settings().sync_native_sessions);
+    assert_eq!(management.settings(), &settings);
+    assert!(management.launch_settings().selected_models.is_empty());
+    assert!(!management.launch_settings().sync_native_sessions);
     assert!(management.credential().is_none());
     assert!(!management.credential_present());
 
@@ -46,6 +47,7 @@ fn generation_enters_configured_mode_only_when_models_and_credential_exist() {
             .unwrap();
     assert_eq!(configured.mode(), SupervisorMode::Configured);
     assert_eq!(configured.settings().selected_models, ["grok-4.5"]);
+    assert_eq!(configured.launch_settings(), configured.settings());
     assert!(configured.settings().sync_native_sessions);
     assert_eq!(
         configured.credential(),

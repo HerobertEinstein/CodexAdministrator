@@ -56,7 +56,7 @@ pub use launcher::{
 };
 pub use launcher_settings::{
     DEFAULT_GROK_ACTION_PATH, DEFAULT_GROK_BASE_URL, LauncherSettings, load_launcher_settings,
-    provider_base_url_for_action_path, save_launcher_settings,
+    provider_base_url_for_action_path, resolve_launcher_control_settings, save_launcher_settings,
 };
 pub use model_discovery::{
     DiscoveredModel, fetch_model_list, injectable_grok_models, is_reviewed_grok_model_id,

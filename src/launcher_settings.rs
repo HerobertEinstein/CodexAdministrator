@@ -41,7 +41,7 @@ impl Default for LauncherSettings {
             cached_models: Vec::new(),
             renderer_addons: Vec::new(),
             sync_native_auth: true,
-            sync_native_sessions: false,
+            sync_native_sessions: true,
         }
     }
 }
@@ -151,4 +151,17 @@ pub fn save_launcher_settings(path: &Path, settings: &LauncherSettings) -> Resul
     let content = serde_json::to_vec_pretty(settings)?;
     install_bootstrap_atomically(path, &content)?;
     Ok(())
+}
+
+pub fn resolve_launcher_control_settings(
+    path: &Path,
+    fallback: LauncherSettings,
+    launcher_managed: bool,
+) -> Result<LauncherSettings> {
+    if launcher_managed {
+        load_launcher_settings(path)
+    } else {
+        fallback.validate()?;
+        Ok(fallback)
+    }
 }

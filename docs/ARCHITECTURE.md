@@ -211,9 +211,11 @@ daily `CODEX_HOME` only as a source and atomically copies validated `auth.json`;
 the source is never modified. This is the file-backed API-key login state, not a
 claim that keyring-only authentication can be cloned between independent homes.
 
-Complete conversation import is separately gated and disabled by default. The
-manager warns that it copies full history, may use several GB, and may send that
-history to the selected Grok provider when continued. Its daily-state read
+Complete conversation import is separately gated and enabled by default for
+managed launches. The manager can disable it and warns that it copies full
+history, may use several GB, and may send that history to the selected Grok
+provider when continued. Each managed restart incrementally synchronizes only
+validated changes. Its daily-state read
 allowlist is exactly `sessions/**/*.jsonl`, `archived_sessions/**/*.jsonl`, and
 `session_index.jsonl`. It never reads or copies daily `config.toml`, SQLite,
 WAL, SHM, logs, goals, memories, junctions, symbolic links, or hard links.

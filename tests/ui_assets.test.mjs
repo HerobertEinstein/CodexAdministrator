@@ -21,6 +21,8 @@ test("injection assets preserve the native UI and add only a namespaced model-pi
   assert.match(source, /data-codex-administrator-model-manager/);
   assert.match(source, /data-codex-intelligence-trigger/);
   assert.match(source, /Compatible injectors/);
+  assert.match(source, /Automatically sync native tasks on launch/);
+  assert.doesNotMatch(source, /Import native task snapshots/);
   assert.match(source, /rendererAddonCatalog/);
   assert.match(source, /data-codex-administrator-renderer-addon/);
   assert.match(source, /__codexAdministratorRendererAddons/);

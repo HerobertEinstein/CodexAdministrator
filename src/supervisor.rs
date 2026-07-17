@@ -16,6 +16,7 @@ pub enum SupervisorMode {
 pub struct SupervisorGeneration {
     mode: SupervisorMode,
     settings: LauncherSettings,
+    launch_settings: LauncherSettings,
     credential_present: bool,
     credential: Option<Zeroizing<String>>,
 }
@@ -33,15 +34,16 @@ impl SupervisorGeneration {
         } else {
             SupervisorMode::Configured
         };
-        let mut settings = settings;
+        let mut launch_settings = settings.clone();
         if mode == SupervisorMode::ManagementOnly {
-            settings.selected_models.clear();
-            settings.sync_native_sessions = false;
+            launch_settings.selected_models.clear();
+            launch_settings.sync_native_sessions = false;
             credential = None;
         }
         Ok(Self {
             mode,
             settings,
+            launch_settings,
             credential_present,
             credential,
         })
@@ -53,6 +55,10 @@ impl SupervisorGeneration {
 
     pub const fn settings(&self) -> &LauncherSettings {
         &self.settings
+    }
+
+    pub const fn launch_settings(&self) -> &LauncherSettings {
+        &self.launch_settings
     }
 
     pub fn credential(&self) -> Option<&str> {
@@ -70,6 +76,7 @@ impl fmt::Debug for SupervisorGeneration {
             .debug_struct("SupervisorGeneration")
             .field("mode", &self.mode)
             .field("settings", &self.settings)
+            .field("launch_settings", &self.launch_settings)
             .field("credential_present", &self.credential_present)
             .finish()
     }

@@ -81,6 +81,15 @@ terminated. Snapshot FILETIME must remain monotonic across main and recheck
 captures. This is bounded repeated-snapshot lineage monitoring, not a kernel
 process-creation trace. These gates do not prove endpoint feature parity.
 
+A separate 2026-07-18 local owner deployment gate refreshed eight reviewed
+Grok models, imported all 323 current daily task snapshots into the retained
+private home while preserving nine pre-existing isolated snapshots, and passed
+two managed restart cycles. The launcher settings hash and native `[desktop]`
+settings remained unchanged, all nine daily ChatGPT PID/creation-time/image
+identities remained present, and no launcher error was produced. This proves
+deployment persistence and one-way incremental import, not arbitrary-history
+resume or complete capability parity.
+
 An external broker can start official plugin-sync helpers without an owned PPID
 chain. Direct therefore queries process command lines through the native Windows
 process-information API during shutdown and before each root-removal attempt.

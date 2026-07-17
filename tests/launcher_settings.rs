@@ -2,7 +2,8 @@ use std::fs;
 
 use codex_administrator::{
     DEFAULT_GROK_ACTION_PATH, DEFAULT_GROK_BASE_URL, DiscoveredModel, LauncherSettings,
-    RendererAddonSettings, load_launcher_settings, save_launcher_settings,
+    RendererAddonSettings, load_launcher_settings, resolve_launcher_control_settings,
+    save_launcher_settings,
 };
 use tempfile::tempdir;
 
@@ -101,5 +102,34 @@ fn missing_launcher_settings_use_safe_defaults() {
     assert!(settings.cached_models.is_empty());
     assert!(settings.renderer_addons.is_empty());
     assert!(settings.sync_native_auth);
-    assert!(!settings.sync_native_sessions);
+    assert!(settings.sync_native_sessions);
+}
+
+#[test]
+fn managed_launch_restores_persisted_control_settings_without_affecting_direct_cli() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("launcher-settings.json");
+    let persisted = LauncherSettings {
+        selected_models: vec!["grok-4.5".into()],
+        cached_models: vec![DiscoveredModel {
+            id: "grok-4.5".into(),
+            owned_by: Some("xai".into()),
+        }],
+        sync_native_sessions: true,
+        ..LauncherSettings::default()
+    };
+    save_launcher_settings(&path, &persisted).unwrap();
+
+    let fallback = LauncherSettings {
+        sync_native_sessions: false,
+        ..LauncherSettings::default()
+    };
+    assert_eq!(
+        resolve_launcher_control_settings(&path, fallback.clone(), true).unwrap(),
+        persisted
+    );
+    assert_eq!(
+        resolve_launcher_control_settings(&path, fallback.clone(), false).unwrap(),
+        fallback
+    );
 }

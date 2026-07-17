@@ -35,6 +35,7 @@ pub fn build_direct_launcher_arguments(
         OsString::from("inject"),
         OsString::from("--host"),
         OsString::from("direct"),
+        OsString::from("--launcher-managed"),
     ];
     for model in &settings.selected_models {
         arguments.push(OsString::from("--model"));

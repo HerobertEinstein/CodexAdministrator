@@ -80,7 +80,9 @@ The production Direct adapter is implemented. It:
 `--no-launch` validates this plan without creating directories or processes.
 It uses the same protected system-`WindowsApps` launchability gate as a real
 launch; a lookalike fixture path is rejected.
-The implementation is not released, merged, or deployed.
+The implementation is not publicly released or merged. A 2026-07-18 local
+owner verification deployment uses the project-owned supervisor and retained
+isolated profile; it is not a supported installer release.
 
 ## Codex++
 

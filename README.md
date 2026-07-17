@@ -18,8 +18,8 @@ The project has three narrowly separated responsibilities:
    was appended without a native-ID collision, when it starts a new task or a
    previously identified Grok task is resumed.
 3. Add a management entry to the official model selector for provider setup,
-   bounded `/v1/models` discovery, Grok selection, optional one-way native-state
-   import, and reviewed renderer-addon settings.
+   bounded `/v1/models` discovery, Grok selection, automatic incremental
+   one-way native-state import, and reviewed renderer-addon settings.
 
 It does not create a separate application interface or replace the host's
 execution loop. Selecting GPT preserves the original request object and
@@ -43,9 +43,10 @@ Official ChatGPT/Codex host
 ## Current Status
 
 This repository is alpha software. The implementation exists only on the
-feature branch; it is not merged or publicly released, and it is not installed
-or deployed. A local project-owned build can be produced without changing the
-official package or daily ChatGPT instance.
+feature branch; it is not merged or publicly released. A local owner
+verification deployment now uses a local project-owned build without changing
+the official package or daily ChatGPT instance. There is still no public
+release or supported installer deployment.
 
 - Provider registration, model-list injection, native-selector management, and
   per-task Grok routing are implemented with fail-closed collision handling.
@@ -60,15 +61,22 @@ official package or daily ChatGPT instance.
   `grok_native`, preserved all nine daily process identities, and removed its
   dynamic listener, process identities, and exact owned root. A separate run
   on the same package also retains management-only proof with no provider key.
+- The 2026-07-18 local owner verification deployment uses the headless
+  supervisor, Windows Credential Manager, and the retained `instances/default`
+  profile instead of the earlier one-off credential-source script. It refreshed
+  eight reviewed Grok models, enabled automatic incremental task import, and
+  completed two restart cycles with unchanged launcher and native `[desktop]`
+  settings, all nine daily process identities preserved, and no launcher error.
 - On `OpenAI.Codex 26.715.2305.0`, exact `grok-4.5` evidence covers Responses
   text streaming and one native text turn. Earlier dated packages separately
   prove one `update_plan` function-call/output loop, one native shell
   `commandExecution` loop, and high reasoning selection. Files, images,
   parallel tools, structured output, cancellation, automated restart/resume,
   and complete native parity remain unclaimed on every package.
-- Native file-backed authentication can be copied one-way into the retained
-  isolated profile. Full task snapshot import is a separate opt-in and remains
-  a visibility/routing feature rather than a resume-parity claim.
+- Native file-backed authentication and validated task snapshots can be copied
+  one-way into the retained isolated profile. Managed launches synchronize
+  changed task snapshots automatically by default; this remains a
+  visibility/routing feature rather than a resume-parity claim.
 - Reviewed renderer addons are currently enabled only for Direct. The shipped
   catalog reviews one exact Codex Dream Skin revision from a user-owned
   checkout; changed assets disable only that payload.
@@ -209,10 +217,11 @@ the provider credential, including a credential embedded inside another JSON
 string, is rejected. This covers the current file-backed API-key login; it does
 not claim to mirror OS-keyring-only authentication modes.
 
-Complete conversation import is a separate, one-way private import and is
-disabled by default. Enabling it shows a confirmation that the full prompts,
-messages, tool output, and environment history may require several GB and may be
-sent to the selected Grok provider when a conversation is continued. The only
+Complete conversation import is a one-way private import that runs
+incrementally at managed launch and is enabled by default. It can be disabled
+in the native model manager. The full prompts, messages, tool output, and
+environment history may require several GB and may be sent to the selected
+Grok provider when a conversation is continued. The only
 daily conversation inputs are `sessions/**/*.jsonl`,
 `archived_sessions/**/*.jsonl`, and `session_index.jsonl` names. Daily
 `config.toml`, SQLite/WAL/SHM files, logs, goals, memories, hard links,

@@ -124,6 +124,8 @@ fn direct_launcher_docs_distinguish_implementation_from_deployment_and_capabilit
     assert!(!combined.contains("isolated launcher is not implemented"));
     assert!(!combined.contains("production launcher, process ownership monitor"));
     assert!(normalized_readme.contains("not merged or publicly released"));
+    assert!(normalized_readme.contains("local owner verification deployment"));
+    assert!(!normalized_readme.contains("not installed or deployed"));
     assert!(normalized_readme.contains("local project-owned build"));
     assert!(architecture.contains("Windows Job Object"));
     assert!(adapters.contains("UI readiness"));
@@ -147,7 +149,8 @@ fn local_launcher_docs_distinguish_retained_login_state_from_process_residue() {
     assert!(normalized.contains("Windows Credential Manager"));
     assert!(normalized.contains("/v1/models"));
     assert!(normalized.contains("one-way private import"));
-    assert!(normalized.contains("disabled by default"));
+    assert!(normalized.contains("enabled by default"));
+    assert!(normalized.contains("can be disabled"));
     assert!(normalized.contains("full prompts, messages, tool output, and environment history"));
     assert!(normalized.contains("session_index.jsonl"));
     assert!(normalized.contains("SQLite/WAL/SHM"));

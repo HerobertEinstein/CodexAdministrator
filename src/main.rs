@@ -23,8 +23,8 @@ use codex_administrator::{
     WindowsCredentialStore, WindowsDirectRuntime, codex_plus_launch_allowed, fetch_model_list,
     find_official_chatgpt_executable, install_grok_native_provider, launch_host_executable,
     launcher_settings_path, prepare_codex_plus_host_script_guarded, prepare_renderer_addons,
-    remove_codex_plus_bootstrap, render_bootstrap, validate_launchable_official_chatgpt_executable,
-    validate_official_chatgpt_executable,
+    remove_codex_plus_bootstrap, render_bootstrap, resolve_launcher_control_settings,
+    validate_launchable_official_chatgpt_executable, validate_official_chatgpt_executable,
 };
 use directories::BaseDirs;
 use serde::Serialize;
@@ -126,6 +126,9 @@ struct InjectArgs {
 
     #[arg(long)]
     no_launch: bool,
+
+    #[arg(long, hide = true)]
+    launcher_managed: bool,
 }
 
 #[derive(Debug, Args)]
@@ -317,7 +320,7 @@ fn inject_direct(
         bail!("native state synchronization requires --retain-instance-root");
     }
     let control_nonce = bootstrap_config.model_picker.control_nonce.clone();
-    let initial_settings = LauncherSettings {
+    let runtime_settings = LauncherSettings {
         base_url: bootstrap_config.model_picker.base_url.clone(),
         action_path: bootstrap_config.model_picker.action_path.clone(),
         action_path_auto: bootstrap_config.model_picker.action_path_auto,
@@ -333,6 +336,9 @@ fn inject_direct(
         sync_native_sessions: args.sync_native_sessions,
         ..LauncherSettings::default()
     };
+    let settings_path = launcher_settings_path()?;
+    let initial_settings =
+        resolve_launcher_control_settings(&settings_path, runtime_settings, args.launcher_managed)?;
     let credential_present = args.credential_present
         || env::var_os(&args.env_key).is_some_and(|value| !value.is_empty());
     let credential_store = WindowsCredentialStore::new(PROVIDER_CREDENTIAL_TARGET);
@@ -340,7 +346,7 @@ fn inject_direct(
         control_nonce.clone(),
         initial_settings,
         credential_present,
-        launcher_settings_path()?,
+        settings_path,
     )?;
     let injected_models = bootstrap_config.models;
     let runtime = if args.sync_native_auth || args.sync_native_sessions {
