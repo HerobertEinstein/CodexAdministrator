@@ -30,11 +30,16 @@ adapter, or modify an official installation.
   child receives only the explicit project provider key among variables
   classified as sensitive; management-only receives none. Custom credentials
   with non-secret-looking variable names must be unset before launch.
-- Native authentication and optional task snapshots are copied one-way into a
-  project-owned isolated home. Daily state is never modified or shared in
-  place.
+- Native authentication, custom Skills, and optional task snapshots are copied
+  one-way into a project-owned isolated home. Daily state is never modified or
+  shared in place.
 - Hard-linked `auth.json` and task snapshots are rejected, along with reparse
   points and other shared-path aliases that could break copy isolation.
+- Hard-linked custom Skill files are excluded. The official `.system` tree,
+  caches, temporary residue, symlinks, junctions, and reparse points are not
+  projected. `skill-projection-manifest.json` permits updates or removals only
+  while the isolated destination still matches its prior hash. Modified
+  isolated Skill projections are never written back to the daily source.
 - Official installation and updater files are never modified.
 - GPT messages and native model entries are preserved unchanged.
 - Codex++ injection requires an exact reviewed executable identity.

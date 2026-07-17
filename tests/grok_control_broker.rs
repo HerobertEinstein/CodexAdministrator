@@ -106,6 +106,7 @@ fn state_read_returns_non_secret_grok_picker_state() {
         response["result"]["model_picker"]["credentialPresent"],
         false
     );
+    assert_eq!(response["result"]["model_picker"]["syncNativeSkills"], true);
     assert!(response.to_string().find("credential_value").is_none());
 }
 
@@ -137,7 +138,8 @@ fn addon_only_apply_persists_external_checkout_settings_and_requests_restart() {
                     "source_root": addon_root
                 }],
                 "sync_native_auth": true,
-                "sync_native_sessions": false
+                "sync_native_sessions": false,
+                "sync_native_skills": false
             }),
         ),
         &store,
@@ -157,6 +159,7 @@ fn addon_only_apply_persists_external_checkout_settings_and_requests_restart() {
         }]
     );
     assert!(saved.selected_models.is_empty());
+    assert!(!saved.sync_native_skills);
 }
 
 #[test]

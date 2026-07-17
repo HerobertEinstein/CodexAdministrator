@@ -28,6 +28,7 @@ pub struct LauncherSettings {
     pub renderer_addons: Vec<RendererAddonSettings>,
     pub sync_native_auth: bool,
     pub sync_native_sessions: bool,
+    pub sync_native_skills: bool,
 }
 
 impl Default for LauncherSettings {
@@ -42,6 +43,7 @@ impl Default for LauncherSettings {
             renderer_addons: Vec::new(),
             sync_native_auth: true,
             sync_native_sessions: true,
+            sync_native_skills: true,
         }
     }
 }

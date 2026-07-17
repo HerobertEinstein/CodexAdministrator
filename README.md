@@ -73,10 +73,11 @@ release or supported installer deployment.
   `commandExecution` loop, and high reasoning selection. Files, images,
   parallel tools, structured output, cancellation, automated restart/resume,
   and complete native parity remain unclaimed on every package.
-- Native file-backed authentication and validated task snapshots can be copied
-  one-way into the retained isolated profile. Managed launches synchronize
-  changed task snapshots automatically by default; this remains a
-  visibility/routing feature rather than a resume-parity claim.
+- Native file-backed authentication, custom Skills, and validated task
+  snapshots can be copied one-way into the retained isolated profile. Managed
+  launches synchronize changed custom Skills and task snapshots automatically
+  by default; task import remains a visibility/routing feature rather than a
+  resume-parity claim.
 - Reviewed renderer addons are currently enabled only for Direct. The shipped
   catalog reviews one exact Codex Dream Skin revision from a user-owned
   checkout; changed assets disable only that payload.
@@ -216,6 +217,21 @@ validates and atomically copies only the daily `auth.json`. A source containing
 the provider credential, including a credential embedded inside another JSON
 string, is rejected. This covers the current file-backed API-key login; it does
 not claim to mirror OS-keyring-only authentication modes.
+
+Custom Skill synchronization is enabled by default for managed launches and
+can be disabled in the native model manager. It projects custom entries from
+the daily `CODEX_HOME\skills` into the isolated home while excluding the
+official `.system` tree, version-control metadata, dependency/build caches,
+temporary residue, symbolic links, junctions, reparse points, and hard-linked
+inputs. Hard-linked custom Skill files are excluded rather than copied.
+
+`skill-projection-manifest.json` records the last source and destination hash
+for every project-owned file. Only an unchanged project-owned projection may
+be updated or removed. A missing, edited, hard-linked, reparse-backed, or
+pre-existing unmanaged isolated path is preserved and recorded as a review
+conflict. Modified isolated Skill projections are never written back to the
+daily Skills source. Custom Skills can contain executable workflows, so the
+daily Skills directory remains a trusted user-controlled source.
 
 Complete conversation import is a one-way private import that runs
 incrementally at managed launch and is enabled by default. It can be disabled

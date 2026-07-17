@@ -32,6 +32,8 @@ struct ApplyPayload {
     renderer_addons: Option<Vec<RendererAddonSettings>>,
     sync_native_auth: bool,
     sync_native_sessions: bool,
+    #[serde(default)]
+    sync_native_skills: Option<bool>,
 }
 
 pub struct GrokControlOutcome {
@@ -227,6 +229,9 @@ impl GrokControlBroker {
         }
         candidate.sync_native_auth = payload.sync_native_auth;
         candidate.sync_native_sessions = payload.sync_native_sessions;
+        if let Some(sync_native_skills) = payload.sync_native_skills {
+            candidate.sync_native_skills = sync_native_skills;
+        }
         candidate.validate()?;
 
         if let Some(credential) = self.pending_credential.as_ref()
@@ -299,6 +304,7 @@ impl GrokControlBroker {
                 "rendererAddons": self.settings.renderer_addons,
                 "syncNativeAuth": self.settings.sync_native_auth,
                 "syncNativeSessions": self.settings.sync_native_sessions,
+                "syncNativeSkills": self.settings.sync_native_skills,
             },
             "models": self.settings.cached_models,
             "selected_models": self.settings.selected_models,

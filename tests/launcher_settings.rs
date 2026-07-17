@@ -103,6 +103,7 @@ fn missing_launcher_settings_use_safe_defaults() {
     assert!(settings.renderer_addons.is_empty());
     assert!(settings.sync_native_auth);
     assert!(settings.sync_native_sessions);
+    assert!(settings.sync_native_skills);
 }
 
 #[test]

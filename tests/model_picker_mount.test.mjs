@@ -304,6 +304,7 @@ test("manager state keeps only Grok models and exposes a reviewed multi-addon ca
       }],
       syncNativeAuth: true,
       syncNativeSessions: false,
+      syncNativeSkills: true,
     },
     [
       { model: "grok-4.5", displayName: "Grok 4.5" },
@@ -317,6 +318,7 @@ test("manager state keeps only Grok models and exposes a reviewed multi-addon ca
   assert.deepEqual(Array.from(state.selectedModels), ["grok-4.5"]);
   assert.equal(state.credentialPresent, true);
   assert.equal(state.codexPlusDetected, true);
+  assert.equal(state.syncNativeSkills, true);
   assert.deepEqual(Array.from(state.modelConflicts), ["grok-4.5"]);
   assert.deepEqual(Array.from(state.rendererAddons, (addon) => ({
     displayName: addon.displayName,
@@ -386,6 +388,7 @@ test("applying filtered results preserves selected models hidden by search", asy
       credentialPresent: true,
       syncNativeAuth: true,
       syncNativeSessions: false,
+      syncNativeSkills: true,
     },
     async request(operation, payload) {
       requests.push({ operation, payload });
@@ -406,6 +409,7 @@ test("applying filtered results preserves selected models hidden by search", asy
   assert.equal(requests.length, 1);
   assert.equal(requests[0].operation, "config.apply");
   assert.deepEqual(Array.from(requests[0].payload.selected_models), ["grok-alpha", "grok-beta"]);
+  assert.equal(requests[0].payload.sync_native_skills, true);
 });
 
 test("checkbox edits survive search rerenders", async () => {

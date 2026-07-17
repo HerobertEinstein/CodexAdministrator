@@ -17,6 +17,10 @@ The project may write only:
   generated model catalog and SQLite location;
 - an atomically validated private copy of daily `auth.json` when native login
   synchronization is enabled;
+- project-owned projections of custom daily `skills` entries when Skill
+  synchronization is enabled, excluding official `.system`, caches, temporary
+  residue, links, and reparse points, plus the isolated
+  `skill-projection-manifest.json` ownership record;
 - private copies of `sessions/**/*.jsonl`, `archived_sessions/**/*.jsonl`, and
   `session_index.jsonl` when task snapshot import is explicitly enabled;
 - its generated Codex++ external script and exact enablement key only after the
@@ -43,9 +47,10 @@ services, update settings, or update channels. An isolated profile or
 `CODEX_HOME` must not equal, contain, or be contained by any daily path. The
 instance path must not traverse a reparse point. The project must not store
 credential values in source, arguments, configuration, logs, reports, tests,
-or compatibility evidence. It must not write daily `auth.json`, task snapshots,
-`config.toml`, SQLite/WAL/SHM, logs, goals, memories, or a renderer-addon source
-checkout.
+or compatibility evidence. It must not write daily `auth.json`, custom Skills,
+task snapshots, `config.toml`, SQLite/WAL/SHM, logs, goals, memories, or a
+renderer-addon source checkout. Modified isolated Skill projections are never
+written back to the daily source.
 
 ## Fail-Closed Updates
 
@@ -64,4 +69,5 @@ runtime provider-readiness failure cleans the root instead of claiming success.
 Removal may delete only project-owned entries, files, and isolated instance
 directories after their absolute paths pass the isolation contract. It must
 preserve all native models, user defaults, other provider definitions, daily
-profiles, tasks, credentials, caches, addon checkouts, and updater state.
+profiles, Skills, tasks, credentials, caches, addon checkouts, and updater
+state.

@@ -84,6 +84,7 @@ use crate::{
     GrokNativeProviderConfig, InjectedModelDescriptor, environment_variable_is_sensitive,
     install_grok_native_model_catalog, install_grok_native_provider, install_isolated_sqlite_home,
     remove_grok_native_model_catalog, remove_grok_native_provider, sync_native_session_snapshots,
+    sync_native_skills,
 };
 
 pub struct WindowsDirectRuntime {
@@ -95,6 +96,7 @@ pub struct WindowsDirectRuntime {
     retain_root: bool,
     sync_native_auth: bool,
     sync_native_sessions: bool,
+    sync_native_skills: bool,
     blocked_environment_keys: BTreeSet<String>,
     root_lock: Option<fs::File>,
     cdp: crate::LoopbackCdpClient,
@@ -253,7 +255,7 @@ fn official_package_version(path: &Path) -> Option<[u64; 4]> {
 
 impl WindowsDirectRuntime {
     pub fn new(root: PathBuf, provider: Option<GrokNativeProviderConfig>) -> Result<Self> {
-        Self::new_with_root_options(root, provider, Vec::new(), false, false, false)
+        Self::new_with_root_options(root, provider, Vec::new(), false, false, false, false)
     }
 
     pub fn new_with_injected_models(
@@ -261,11 +263,11 @@ impl WindowsDirectRuntime {
         provider: Option<GrokNativeProviderConfig>,
         injected_models: Vec<InjectedModelDescriptor>,
     ) -> Result<Self> {
-        Self::new_with_root_options(root, provider, injected_models, false, false, false)
+        Self::new_with_root_options(root, provider, injected_models, false, false, false, false)
     }
 
     pub fn new_retained(root: PathBuf, provider: Option<GrokNativeProviderConfig>) -> Result<Self> {
-        Self::new_with_root_options(root, provider, Vec::new(), true, false, false)
+        Self::new_with_root_options(root, provider, Vec::new(), true, false, false, false)
     }
 
     pub fn new_retained_with_injected_models(
@@ -273,14 +275,14 @@ impl WindowsDirectRuntime {
         provider: Option<GrokNativeProviderConfig>,
         injected_models: Vec<InjectedModelDescriptor>,
     ) -> Result<Self> {
-        Self::new_with_root_options(root, provider, injected_models, true, false, false)
+        Self::new_with_root_options(root, provider, injected_models, true, false, false, false)
     }
 
     pub fn new_retained_with_native_auth_sync(
         root: PathBuf,
         provider: Option<GrokNativeProviderConfig>,
     ) -> Result<Self> {
-        Self::new_with_root_options(root, provider, Vec::new(), true, true, false)
+        Self::new_with_root_options(root, provider, Vec::new(), true, true, false, false)
     }
 
     pub fn new_retained_with_native_auth_sync_and_injected_models(
@@ -288,7 +290,7 @@ impl WindowsDirectRuntime {
         provider: Option<GrokNativeProviderConfig>,
         injected_models: Vec<InjectedModelDescriptor>,
     ) -> Result<Self> {
-        Self::new_with_root_options(root, provider, injected_models, true, true, false)
+        Self::new_with_root_options(root, provider, injected_models, true, true, false, false)
     }
 
     pub fn new_retained_with_native_state_sync_and_injected_models(
@@ -297,6 +299,7 @@ impl WindowsDirectRuntime {
         injected_models: Vec<InjectedModelDescriptor>,
         sync_native_auth: bool,
         sync_native_sessions: bool,
+        sync_native_skills: bool,
     ) -> Result<Self> {
         Self::new_with_root_options(
             root,
@@ -305,6 +308,7 @@ impl WindowsDirectRuntime {
             true,
             sync_native_auth,
             sync_native_sessions,
+            sync_native_skills,
         )
     }
 
@@ -315,6 +319,7 @@ impl WindowsDirectRuntime {
         retain_root: bool,
         sync_native_auth: bool,
         sync_native_sessions: bool,
+        sync_native_skills: bool,
     ) -> Result<Self> {
         if !root.is_absolute() {
             bail!("isolated Windows runtime root must be absolute");
@@ -337,6 +342,7 @@ impl WindowsDirectRuntime {
             retain_root,
             sync_native_auth,
             sync_native_sessions,
+            sync_native_skills,
             blocked_environment_keys: BTreeSet::new(),
             root_lock: None,
             cdp: crate::LoopbackCdpClient::default(),
@@ -497,6 +503,9 @@ impl DirectRuntimeBackend for WindowsDirectRuntime {
                     contract.isolated_codex_home(),
                     GROK_NATIVE_PROVIDER_ID,
                 )?;
+            }
+            if self.sync_native_skills {
+                sync_native_skills(contract.daily_codex_home(), contract.isolated_codex_home())?;
             }
             if let Some(provider) = &self.provider {
                 if !self.injected_models.is_empty() {

@@ -101,6 +101,9 @@ struct InjectArgs {
     sync_native_sessions: bool,
 
     #[arg(long, hide = true)]
+    sync_native_skills: bool,
+
+    #[arg(long, hide = true)]
     credential_present: bool,
 
     #[arg(long, value_name = "DIR", hide = true)]
@@ -191,6 +194,7 @@ fn inject(args: InjectArgs) -> Result<()> {
         action_path_auto: !args.manual_action_path,
         sync_native_auth: args.sync_native_auth,
         sync_native_sessions: args.sync_native_sessions,
+        sync_native_skills: args.sync_native_skills,
         credential_present: args.credential_present
             || env::var_os(&args.env_key).is_some_and(|value| !value.is_empty()),
         renderer_addons: renderer_addons.clone(),
@@ -316,7 +320,9 @@ fn inject_direct(
         return Ok(());
     }
 
-    if (args.sync_native_auth || args.sync_native_sessions) && !args.retain_instance_root {
+    if (args.sync_native_auth || args.sync_native_sessions || args.sync_native_skills)
+        && !args.retain_instance_root
+    {
         bail!("native state synchronization requires --retain-instance-root");
     }
     let control_nonce = bootstrap_config.model_picker.control_nonce.clone();
@@ -334,6 +340,7 @@ fn inject_direct(
         renderer_addons,
         sync_native_auth: args.sync_native_auth,
         sync_native_sessions: args.sync_native_sessions,
+        sync_native_skills: args.sync_native_skills,
         ..LauncherSettings::default()
     };
     let settings_path = launcher_settings_path()?;
@@ -349,13 +356,14 @@ fn inject_direct(
         settings_path,
     )?;
     let injected_models = bootstrap_config.models;
-    let runtime = if args.sync_native_auth || args.sync_native_sessions {
+    let runtime = if args.sync_native_auth || args.sync_native_sessions || args.sync_native_skills {
         WindowsDirectRuntime::new_retained_with_native_state_sync_and_injected_models(
             root.clone(),
             provider,
             injected_models,
             args.sync_native_auth,
             args.sync_native_sessions,
+            args.sync_native_skills,
         )?
     } else if args.retain_instance_root {
         WindowsDirectRuntime::new_retained_with_injected_models(

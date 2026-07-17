@@ -15,6 +15,8 @@ mod model_discovery;
 mod native_model_catalog;
 mod native_provider;
 #[cfg(windows)]
+mod native_skill_sync;
+#[cfg(windows)]
 mod native_state_sync;
 mod renderer_addons;
 mod startup;
@@ -69,6 +71,8 @@ pub use native_provider::{
     GROK_NATIVE_PROVIDER_ID, GrokNativeProviderConfig, NativeProviderInstallReceipt,
     install_grok_native_provider, remove_grok_native_provider,
 };
+#[cfg(windows)]
+pub use native_skill_sync::{NativeSkillSyncReceipt, sync_native_skills};
 #[cfg(windows)]
 pub use native_state_sync::{
     NativeSessionSyncReceipt, install_isolated_sqlite_home, sync_native_session_snapshots,

@@ -312,6 +312,11 @@ fn public_docs_record_current_control_and_state_safety_boundaries() {
         "Management-only startup never passes the provider key to the official child",
         "A control request that times out while queued is invalidated before it can be drained",
         "Hard-linked `auth.json` and task snapshots are rejected",
+        "Custom Skill synchronization is enabled by default",
+        "official `.system`",
+        "`skill-projection-manifest.json`",
+        "Hard-linked custom Skill files are excluded",
+        "Modified isolated Skill projections are never written back",
         "Existing tool configuration is preserved",
         "The stored credential includes an endpoint fingerprint",
         "secret-shaped inherited environment variables",
@@ -555,4 +560,15 @@ fn native_auth_sync_uses_one_bounded_identity_checked_handle() {
     assert!(sync.contains("GetFileInformationByHandle"));
     assert!(sync.contains("nNumberOfLinks"));
     assert!(sync.contains("take(MAX_NATIVE_AUTH_BYTES + 1)"));
+}
+
+#[test]
+fn native_skill_sync_uses_bounded_identity_checked_handles() {
+    let sync = fs::read_to_string(root().join("src/native_skill_sync.rs")).unwrap();
+
+    assert!(sync.contains("FILE_FLAG_OPEN_REPARSE_POINT"));
+    assert!(sync.contains("GetFileInformationByHandle"));
+    assert!(sync.contains("nNumberOfLinks"));
+    assert!(sync.contains("MAX_SKILL_FILE_BYTES"));
+    assert!(sync.contains("take(MAX_SKILL_FILE_BYTES + 1)"));
 }

@@ -389,6 +389,7 @@ fn retained_windows_runtime_imports_stable_daily_sessions_into_its_private_home(
             Vec::new(),
             false,
             true,
+            false,
         )
         .unwrap();
     runtime.prepare_owned_paths(layout.contract()).unwrap();
@@ -409,6 +410,60 @@ fn retained_windows_runtime_imports_stable_daily_sessions_into_its_private_home(
             .contains("sqlite_home")
     );
     assert!(!root.join("codex-home/state_5.sqlite").exists());
+    runtime.shutdown().unwrap();
+}
+
+#[test]
+fn retained_windows_runtime_projects_daily_custom_skills_on_launch() {
+    let temp = tempdir().unwrap();
+    let root = temp
+        .path()
+        .join("CodexAdministrator")
+        .join("instances")
+        .join("retained-native-skills");
+    let daily_codex_home = temp.path().join("daily-codex-home");
+    fs::create_dir_all(daily_codex_home.join("skills/custom-skill")).unwrap();
+    fs::create_dir_all(daily_codex_home.join("skills/.system")).unwrap();
+    fs::write(
+        daily_codex_home.join("skills/custom-skill/SKILL.md"),
+        "# Custom skill\n",
+    )
+    .unwrap();
+    fs::write(
+        daily_codex_home.join("skills/.system/SKILL.md"),
+        "# Daily system skill\n",
+    )
+    .unwrap();
+    let layout = DirectInstanceLayout::new(
+        root.clone(),
+        powershell_path(),
+        temp.path().join("daily-profile"),
+        daily_codex_home,
+        9341,
+    )
+    .unwrap();
+    let mut runtime =
+        WindowsDirectRuntime::new_retained_with_native_state_sync_and_injected_models(
+            root.clone(),
+            None,
+            Vec::new(),
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+
+    runtime.prepare_owned_paths(layout.contract()).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(root.join("codex-home/skills/custom-skill/SKILL.md")).unwrap(),
+        "# Custom skill\n"
+    );
+    assert!(!root.join("codex-home/skills/.system/SKILL.md").exists());
+    assert!(
+        root.join("codex-home/skill-projection-manifest.json")
+            .is_file()
+    );
     runtime.shutdown().unwrap();
 }
 

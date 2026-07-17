@@ -211,6 +211,21 @@ daily `CODEX_HOME` only as a source and atomically copies validated `auth.json`;
 the source is never modified. This is the file-backed API-key login state, not a
 claim that keyring-only authentication can be cloned between independent homes.
 
+Custom Skill synchronization is enabled by default for managed launches and is
+separately controllable in the selector manager. The daily `CODEX_HOME/skills`
+is the canonical read-only source. The projector excludes the official
+`.system` tree, cache and temporary residue, reparse points, symbolic links,
+junctions, and hard-linked custom Skill files. It never mirrors either
+`CODEX_HOME` database or the daily `config.toml`.
+
+The isolated `skill-projection-manifest.json` stores source and destination
+hashes for project-owned files. Updates and removals require the isolated hash
+to match the prior projection. Missing, modified, hard-linked, reparse-backed,
+or unmanaged destinations become durable review conflicts and remain intact.
+Modified isolated Skill projections are never written back to the daily Skills
+source. The manifest rejects absolute, parent-traversal, reserved `.system`,
+and case-colliding paths before any destination mutation.
+
 Complete conversation import is separately gated and enabled by default for
 managed launches. The manager can disable it and warns that it copies full
 history, may use several GB, and may send that history to the selected Grok
