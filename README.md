@@ -64,9 +64,11 @@ release or supported installer deployment.
 - The 2026-07-18 local owner verification deployment uses the headless
   supervisor, Windows Credential Manager, and the retained `instances/default`
   profile instead of the earlier one-off credential-source script. It refreshed
-  eight reviewed Grok models, enabled automatic incremental task import, and
-  completed two restart cycles with unchanged launcher and native `[desktop]`
-  settings, all nine daily process identities preserved, and no launcher error.
+  eight reviewed Grok models, enabled automatic incremental task and custom
+  Skill synchronization, and completed two restart cycles with 99 custom files
+  unchanged on the second launch, zero Skill conflicts, 332 retained task
+  snapshots, unchanged launcher and native `[desktop]` settings, all nine daily
+  process identities preserved, and no launcher error.
 - On `OpenAI.Codex 26.715.2305.0`, exact `grok-4.5` evidence covers Responses
   text streaming and one native text turn. Earlier dated packages separately
   prove one `update_plan` function-call/output loop, one native shell
