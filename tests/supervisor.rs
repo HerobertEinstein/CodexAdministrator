@@ -163,3 +163,26 @@ fn supervisor_fails_closed_on_abnormal_exit_or_restart_storm() {
     };
     assert!(supervise_launcher(&mut storm, 2).is_err());
 }
+
+#[test]
+fn supervisor_preserves_child_diagnostics_when_readiness_is_missing() {
+    let mut backend = FakeBackend {
+        generations: VecDeque::from([SupervisorGeneration::new(
+            configured_settings(),
+            Some("provider-secret".into()),
+        )
+        .unwrap()]),
+        outcomes: VecDeque::from([LauncherChildOutcome {
+            ready_mode: None,
+            restart_requested: false,
+            success: false,
+            exit_code: Some(1),
+            diagnostic: "native provider readiness timed out".into(),
+        }]),
+        observed_modes: Vec::new(),
+    };
+
+    let error = supervise_launcher(&mut backend, 2).unwrap_err().to_string();
+    assert!(error.contains("did not report readiness"));
+    assert!(error.contains("native provider readiness timed out"));
+}

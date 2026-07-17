@@ -118,7 +118,10 @@ pub fn supervise_launcher<B: LauncherSupervisorBackend>(
         let generation = backend.load_generation()?;
         let outcome = backend.run_generation(&generation)?;
         if outcome.ready_mode != Some(generation.mode()) {
-            bail!("isolated child did not report readiness for the requested mode");
+            return bail_with_outcome(
+                "isolated child did not report readiness for the requested mode",
+                &outcome,
+            );
         }
         if outcome.restart_requested {
             if !outcome.success {
