@@ -1,15 +1,20 @@
 # Host Adapters
 
-Both adapters deliver the same generated model-list bridge. Neither adapter
-owns model execution or the native interface.
+The source contains two adapter contracts, but only Direct is currently
+eligible to deliver the generated model-list bridge. No Codex++ executable is
+currently eligible because the shipped compatibility host list is empty.
+Neither adapter owns model execution or the native interface.
 
 ## Direct
 
 The direct adapter is reserved for a project-owned isolated instance of the
 official desktop application. It may not reuse or activate the daily instance.
 
-A fresh live run of official package `OpenAI.Codex 26.707.9981.0` reconfirmed
-that a separate profile and loopback CDP port create a separate process tree.
+The most recent retained live run, on 2026-07-17 with official package
+`OpenAI.Codex 26.715.2305.0`, used management-only mode with no selected Grok
+model or provider credential. It reconfirmed that a separate profile and
+loopback CDP port create a separate process tree, preserves every daily PID,
+and leaves no owned root, process reference, or listener after shutdown.
 Starting the same isolated profile a second time with `--new-window` creates an
 `app://-/index.html` target on that isolated port. The official
 `window.electronBridge` is frozen, sealed, and non-writable; the reviewed hook
@@ -33,6 +38,8 @@ The production Direct adapter is implemented. It:
   one `app://-/index.html` target on that port;
 - waits separately for bridge health and native UI readiness, then requires the
   official app-server `config/read` result to contain `grok_native`;
+- exposes provider and model management only inside the official model selector
+  while the project launcher remains a headless supervisor;
 - installs Ctrl+C handling before any owned path or process is created;
 - checks every pre-existing daily PID during maintenance;
 - tolerates bounded target/health transitions and reinjects after renderer
@@ -53,8 +60,8 @@ The production Direct adapter is implemented. It:
   refreshes the anchor window and causes fail-closed timeout if it persists.
   Shutdown requires five continuous seconds of empty descendant captures and
   anchor observation, rejects backward time within or across snapshots and
-  deadline overruns, and deletes only its owned root. Its ten-second absolute
-  budget begins before the initial global scan. External broker helpers without
+  deadline overruns, and deletes only its owned root. Its thirty-second
+  descendant cleanup budget begins after the initial global scan. External broker helpers without
   owned ancestry are included only when a root-contained executable or supported
   Git, PowerShell, or Chromium path argument identifies the exact root. Git `-C`
   resolves cumulatively to the final cwd, drive roots stay absolute, and repeated
@@ -65,7 +72,7 @@ The production Direct adapter is implemented. It:
   synchronization use a separate handle with the same creation time; unreadable unmatched
   processes do not widen ownership, while post-match termination/identity failure
   is fail-closed. Query-only liveness uses `GetExitCodeProcess`. Root scan, process wait, and deletion share one separate
-  ten-second deadline.
+  10-second owned-root removal deadline.
 
 `--no-launch` validates this plan without creating directories or processes.
 It uses the same protected system-`WindowsApps` launchability gate as a real
@@ -89,6 +96,8 @@ The adapter is enabled only when the executable SHA-256 appears in the shipped
 compatibility manifest with matching project, bootstrap, and E2E evidence
 identities. Otherwise any stale project script is removed and Codex++ remains
 native.
+The current manifest contains no hosts, so this branch cannot enable or launch
+Codex++ injection.
 
 ## Update Behavior
 

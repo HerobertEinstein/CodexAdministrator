@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     env,
     io::{self, Write},
     net::TcpListener,
@@ -15,9 +16,13 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use codex_administrator::{
     BootstrapConfig, CompatibilityDecision, CompatibilityManifest, CompatibilityPolicy,
-    DirectInstance, DirectInstanceLayout, GrokNativeProviderConfig, HostAdapterKind, HostIdentity,
-    InjectedModelDescriptor, WindowsDirectRuntime, find_official_chatgpt_executable,
-    install_grok_native_provider, launch_host_executable, prepare_codex_plus_host_guarded,
+    DEFAULT_GROK_ACTION_PATH, DEFAULT_GROK_BASE_URL, DirectInstance, DirectInstanceLayout,
+    DiscoveredModel, GrokControlBroker, GrokNativeProviderConfig, HostAdapterKind, HostIdentity,
+    InjectedModelDescriptor, LauncherSettings, ModelPickerConfig, PROVIDER_CREDENTIAL_TARGET,
+    RendererAddonPolicy, RendererAddonReport, RendererAddonSettings, SupervisorMode,
+    WindowsCredentialStore, WindowsDirectRuntime, codex_plus_launch_allowed, fetch_model_list,
+    find_official_chatgpt_executable, install_grok_native_provider, launch_host_executable,
+    launcher_settings_path, prepare_codex_plus_host_script_guarded, prepare_renderer_addons,
     remove_codex_plus_bootstrap, render_bootstrap, validate_launchable_official_chatgpt_executable,
     validate_official_chatgpt_executable,
 };
@@ -47,6 +52,9 @@ struct ConfigureProviderArgs {
     #[arg(long, value_name = "URL")]
     base_url: String,
 
+    #[arg(long, value_name = "PATH", default_value = DEFAULT_GROK_ACTION_PATH)]
+    action_path: String,
+
     #[arg(long, value_name = "ENV", default_value = "XAI_API_KEY")]
     env_key: String,
 
@@ -59,11 +67,20 @@ struct InjectArgs {
     #[arg(long, value_enum, default_value_t = HostAdapterKind::Direct)]
     host: HostAdapterKind,
 
-    #[arg(long = "model", value_name = "MODEL", required = true)]
+    #[arg(long = "model", value_name = "MODEL")]
     models: Vec<String>,
+
+    #[arg(long = "renderer-addon", value_name = "ID=ABSOLUTE_PATH", hide = true)]
+    renderer_addons: Vec<String>,
 
     #[arg(long, value_name = "URL")]
     base_url: Option<String>,
+
+    #[arg(long, value_name = "PATH", default_value = DEFAULT_GROK_ACTION_PATH)]
+    action_path: String,
+
+    #[arg(long, hide = true)]
+    manual_action_path: bool,
 
     #[arg(long, value_name = "ENV", default_value = "XAI_API_KEY")]
     env_key: String,
@@ -73,6 +90,18 @@ struct InjectArgs {
 
     #[arg(long, value_name = "DIR", hide = true)]
     instance_root: Option<PathBuf>,
+
+    #[arg(long, hide = true)]
+    retain_instance_root: bool,
+
+    #[arg(long, hide = true)]
+    sync_native_auth: bool,
+
+    #[arg(long, hide = true)]
+    sync_native_sessions: bool,
+
+    #[arg(long, hide = true)]
+    credential_present: bool,
 
     #[arg(long, value_name = "DIR", hide = true)]
     daily_profile: Option<PathBuf>,
@@ -116,6 +145,7 @@ fn main() -> Result<()> {
 fn configure_provider(args: ConfigureProviderArgs) -> Result<()> {
     let provider = GrokNativeProviderConfig {
         base_url: args.base_url,
+        action_path: args.action_path,
         env_key: args.env_key,
         supports_websockets: false,
     };
@@ -143,6 +173,28 @@ fn configure_provider(args: ConfigureProviderArgs) -> Result<()> {
 }
 
 fn inject(args: InjectArgs) -> Result<()> {
+    let renderer_addons = parse_renderer_addon_settings(&args.renderer_addons)?;
+    let addon_policy = RendererAddonPolicy::shipped()?;
+    let addon_bundle = prepare_renderer_addons(&renderer_addons, &addon_policy, args.host);
+    let addon_catalog = addon_policy.catalog(args.host);
+    let addon_reports = addon_bundle.reports().to_vec();
+    let model_picker = ModelPickerConfig {
+        host_adapter: args.host,
+        base_url: args
+            .base_url
+            .clone()
+            .unwrap_or_else(|| DEFAULT_GROK_BASE_URL.into()),
+        action_path: args.action_path.clone(),
+        action_path_auto: !args.manual_action_path,
+        sync_native_auth: args.sync_native_auth,
+        sync_native_sessions: args.sync_native_sessions,
+        credential_present: args.credential_present
+            || env::var_os(&args.env_key).is_some_and(|value| !value.is_empty()),
+        renderer_addons: renderer_addons.clone(),
+        renderer_addon_catalog: addon_catalog,
+        renderer_addon_reports: addon_reports.clone(),
+        control_nonce: ModelPickerConfig::default().control_nonce,
+    };
     let bootstrap_config = BootstrapConfig {
         models: args
             .models
@@ -150,31 +202,59 @@ fn inject(args: InjectArgs) -> Result<()> {
             .cloned()
             .map(InjectedModelDescriptor::grok)
             .collect(),
+        model_picker,
     };
-    render_bootstrap(&bootstrap_config)?;
+    let core_bootstrap = render_bootstrap(&bootstrap_config)?;
+    let bootstrap = addon_bundle.compose(&core_bootstrap);
 
     match args.host {
-        HostAdapterKind::Direct => inject_direct(args, bootstrap_config),
-        HostAdapterKind::CodexPlusPlus => inject_codex_plus(args, bootstrap_config),
+        HostAdapterKind::Direct => inject_direct(
+            args,
+            bootstrap_config,
+            bootstrap,
+            renderer_addons,
+            addon_reports,
+        ),
+        HostAdapterKind::CodexPlusPlus => inject_codex_plus(args, bootstrap, addon_reports),
     }
 }
 
-fn inject_direct(args: InjectArgs, bootstrap_config: BootstrapConfig) -> Result<()> {
-    let provider = GrokNativeProviderConfig {
-        base_url: args
-            .base_url
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("direct injection requires --base-url"))?,
-        env_key: args.env_key.clone(),
-        supports_websockets: false,
+fn inject_direct(
+    args: InjectArgs,
+    bootstrap_config: BootstrapConfig,
+    bootstrap: String,
+    renderer_addons: Vec<RendererAddonSettings>,
+    renderer_addon_reports: Vec<RendererAddonReport>,
+) -> Result<()> {
+    let provider = if args.models.is_empty() {
+        None
+    } else {
+        let provider = GrokNativeProviderConfig {
+            base_url: args
+                .base_url
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("direct injection requires --base-url"))?,
+            action_path: args.action_path.clone(),
+            env_key: args.env_key.clone(),
+            supports_websockets: false,
+        };
+        provider.validate()?;
+        if env::var_os(&provider.env_key).is_none_or(|value| value.is_empty()) {
+            bail!(
+                "required provider credential environment variable {} is not set",
+                provider.env_key
+            );
+        }
+        Some(provider)
     };
-    provider.validate()?;
-    if env::var_os(&provider.env_key).is_none_or(|value| value.is_empty()) {
-        bail!(
-            "required provider credential environment variable {} is not set",
-            provider.env_key
-        );
-    }
+    let provider_id = provider
+        .as_ref()
+        .map(|_| codex_administrator::GROK_NATIVE_PROVIDER_ID);
+    let mode = if provider.is_some() {
+        SupervisorMode::Configured
+    } else {
+        SupervisorMode::ManagementOnly
+    };
 
     let executable = match args.official_path.clone() {
         Some(path) => path,
@@ -213,8 +293,6 @@ fn inject_direct(args: InjectArgs, bootstrap_config: BootstrapConfig) -> Result<
         daily_codex_home,
         cdp_port,
     )?;
-    let bootstrap = render_bootstrap(&bootstrap_config)?;
-
     if args.no_launch {
         println!(
             "{}",
@@ -223,17 +301,70 @@ fn inject_direct(args: InjectArgs, bootstrap_config: BootstrapConfig) -> Result<
                 "host": args.host,
                 "injection_enabled": false,
                 "reason": "no_launch",
+                "mode": mode,
                 "official_executable": executable,
                 "instance_root": root,
                 "cdp_port": cdp_port,
-                "provider": codex_administrator::GROK_NATIVE_PROVIDER_ID,
+                "provider": provider_id,
                 "models": args.models,
+                "renderer_addons": renderer_addon_reports,
             }))?
         );
         return Ok(());
     }
 
-    let runtime = WindowsDirectRuntime::new(root.clone(), Some(provider))?;
+    if (args.sync_native_auth || args.sync_native_sessions) && !args.retain_instance_root {
+        bail!("native state synchronization requires --retain-instance-root");
+    }
+    let control_nonce = bootstrap_config.model_picker.control_nonce.clone();
+    let initial_settings = LauncherSettings {
+        base_url: bootstrap_config.model_picker.base_url.clone(),
+        action_path: bootstrap_config.model_picker.action_path.clone(),
+        action_path_auto: bootstrap_config.model_picker.action_path_auto,
+        selected_models: args.models.clone(),
+        cached_models: args
+            .models
+            .iter()
+            .cloned()
+            .map(|id| DiscoveredModel { id, owned_by: None })
+            .collect(),
+        renderer_addons,
+        sync_native_auth: args.sync_native_auth,
+        sync_native_sessions: args.sync_native_sessions,
+        ..LauncherSettings::default()
+    };
+    let credential_present = args.credential_present
+        || env::var_os(&args.env_key).is_some_and(|value| !value.is_empty());
+    let credential_store = WindowsCredentialStore::new(PROVIDER_CREDENTIAL_TARGET);
+    let mut control_broker = GrokControlBroker::new(
+        control_nonce.clone(),
+        initial_settings,
+        credential_present,
+        launcher_settings_path()?,
+    )?;
+    let injected_models = bootstrap_config.models;
+    let runtime = if args.sync_native_auth || args.sync_native_sessions {
+        WindowsDirectRuntime::new_retained_with_native_state_sync_and_injected_models(
+            root.clone(),
+            provider,
+            injected_models,
+            args.sync_native_auth,
+            args.sync_native_sessions,
+        )?
+    } else if args.retain_instance_root {
+        WindowsDirectRuntime::new_retained_with_injected_models(
+            root.clone(),
+            provider,
+            injected_models,
+        )?
+    } else {
+        WindowsDirectRuntime::new_with_injected_models(root.clone(), provider, injected_models)?
+    };
+    let runtime = if mode == SupervisorMode::ManagementOnly {
+        runtime.with_blocked_environment_key(&args.env_key)?
+    } else {
+        runtime
+    };
     let timeout = Duration::from_secs(args.startup_timeout_seconds);
     let stopping = Arc::new(AtomicBool::new(false));
     let stopping_for_handler = Arc::clone(&stopping);
@@ -251,30 +382,60 @@ fn inject_direct(args: InjectArgs, bootstrap_config: BootstrapConfig) -> Result<
             "status": "ready",
             "host": args.host,
             "injection_enabled": true,
+            "mode": mode,
             "official_executable": executable,
             "instance_root": root,
             "cdp_port": cdp_port,
             "target": instance.target(),
-            "provider": codex_administrator::GROK_NATIVE_PROVIDER_ID,
+            "provider": provider_id,
             "models": args.models,
+            "renderer_addons": renderer_addon_reports,
         }))?
     );
     io::stdout().flush()?;
 
     let started = Instant::now();
+    let mut restart_requested = false;
     while !stopping.load(Ordering::SeqCst)
         && args
             .session_timeout_seconds
             .is_none_or(|seconds| started.elapsed() < Duration::from_secs(seconds))
     {
         thread::sleep(Duration::from_millis(500));
-        instance.maintain_once()?;
+        if instance.maintain_once()? == codex_administrator::DirectMaintenance::Exited {
+            break;
+        }
+        for request in instance.drain_control_requests(&control_nonce)? {
+            let outcome = control_broker.handle(request, &credential_store, fetch_model_list);
+            let request_restart = outcome.restart_required;
+            instance.deliver_control_response(outcome.response)?;
+            if request_restart {
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "status": "restart_requested",
+                        "host": args.host,
+                        "instance_root": root,
+                    }))?
+                );
+                io::stdout().flush()?;
+                restart_requested = true;
+                break;
+            }
+        }
+        if restart_requested {
+            break;
+        }
     }
     instance.shutdown()?;
     Ok(())
 }
 
-fn inject_codex_plus(args: InjectArgs, bootstrap_config: BootstrapConfig) -> Result<()> {
+fn inject_codex_plus(
+    args: InjectArgs,
+    bootstrap: String,
+    renderer_addon_reports: Vec<RendererAddonReport>,
+) -> Result<()> {
     let appdata = args.appdata.unwrap_or(default_appdata()?);
     let executable = args
         .codex_plus_path
@@ -298,7 +459,7 @@ fn inject_codex_plus(args: InjectArgs, bootstrap_config: BootstrapConfig) -> Res
         };
 
     let mut outcome =
-        prepare_codex_plus_host_guarded(&appdata, &bootstrap_config, identity.as_ref(), &policy);
+        prepare_codex_plus_host_script_guarded(&appdata, &bootstrap, identity.as_ref(), &policy);
     let mut warnings = Vec::new();
     if outcome.bootstrap.is_some()
         && !identity
@@ -320,9 +481,11 @@ fn inject_codex_plus(args: InjectArgs, bootstrap_config: BootstrapConfig) -> Res
         };
     }
 
-    if !args.no_launch
-        && let Err(error) = launch_host_executable(&executable)
-    {
+    let launch_allowed = codex_plus_launch_allowed(args.no_launch, &outcome);
+    if !args.no_launch && !launch_allowed {
+        warnings.push("unverified Codex++ host was not launched".into());
+    }
+    if launch_allowed && let Err(error) = launch_host_executable(&executable) {
         let cleanup = remove_codex_plus_bootstrap(&appdata)
             .err()
             .map(|cleanup| format!("; bootstrap cleanup also failed: {cleanup}"))
@@ -356,9 +519,35 @@ fn inject_codex_plus(args: InjectArgs, bootstrap_config: BootstrapConfig) -> Res
                 "sha256": receipt.sha256,
             })),
             "warnings": warnings,
+            "renderer_addons": renderer_addon_reports,
         }))?
     );
     Ok(())
+}
+
+fn parse_renderer_addon_settings(values: &[String]) -> Result<Vec<RendererAddonSettings>> {
+    if values.len() > 16 {
+        bail!("too many renderer addons were requested");
+    }
+    let mut seen = BTreeSet::new();
+    values
+        .iter()
+        .map(|value| {
+            let (id, source_root) = value
+                .split_once('=')
+                .ok_or_else(|| anyhow::anyhow!("renderer addon must use ID=ABSOLUTE_PATH"))?;
+            let setting = RendererAddonSettings {
+                id: id.to_owned(),
+                enabled: true,
+                source_root: PathBuf::from(source_root),
+            };
+            setting.validate()?;
+            if !seen.insert(setting.id.clone()) {
+                bail!("renderer addon IDs must be unique");
+            }
+            Ok(setting)
+        })
+        .collect()
 }
 
 fn doctor(args: DoctorArgs) -> Result<()> {

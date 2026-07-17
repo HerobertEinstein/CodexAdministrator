@@ -1,5 +1,6 @@
 /target/
 /output/
+/.agent_memory/verification/
 /.playwright-cli/
 /.idea/
 /.vscode/

@@ -13,11 +13,44 @@ adapter, or modify an official installation.
 
 ## Trust Boundary
 
-- Credential values remain in user-managed environment variables.
-- Provider configuration stores only the environment-variable name.
-- Generated scripts contain model metadata and routing logic only.
+- The native selector manager stores the provider key only as a per-user
+  Generic Credential in Windows Credential Manager. The CLI alternative keeps
+  it in a user-managed environment variable.
+- The stored credential includes an endpoint fingerprint. A different Base URL
+  or Action Path cannot reuse it after an offline settings change or restart.
+- Provider configuration stores only the environment-variable name. The
+  isolated child receives the key through a project-specific process
+  environment variable that native shell tools are configured to exclude.
+- Generated scripts contain model metadata, routing, the native-selector
+  manager bridge, and optional exact-hash renderer addon payloads. They contain
+  no provider credential or copied daily authentication state.
+- Both launcher stages remove recognized credential-bearing and secret-shaped
+  inherited environment variables, including common API-key, token, password,
+  PAT, connection-string, and database credential names. A configured official
+  child receives only the explicit project provider key among variables
+  classified as sensitive; management-only receives none. Custom credentials
+  with non-secret-looking variable names must be unset before launch.
+- Native authentication and optional task snapshots are copied one-way into a
+  project-owned isolated home. Daily state is never modified or shared in
+  place.
+- Hard-linked `auth.json` and task snapshots are rejected, along with reparse
+  points and other shared-path aliases that could break copy isolation.
 - Official installation and updater files are never modified.
 - GPT messages and native model entries are preserved unchanged.
 - Codex++ injection requires an exact reviewed executable identity.
 - Unknown host versions fail closed and remove only stale project-owned data.
 - The project does not claim unverified model capabilities.
+
+## Local DevTools Boundary
+
+The Chromium DevTools endpoint is unauthenticated. Direct mode keeps it on a
+random loopback port only for the lifetime of the isolated instance, verifies
+that the listener PID belongs to the owned Job Object, and validates the exact
+renderer target before use. Those checks prevent accidental attachment to the
+wrong host; they do not authenticate other local clients.
+
+A hostile local process, or another local Windows account able to discover and
+connect to that loopback endpoint, is outside this threat model. Such a client
+could inspect or manipulate the isolated renderer, including transient manager
+form input. Do not run Direct mode alongside untrusted local software. The
+listener never binds beyond loopback and is verified closed during shutdown.

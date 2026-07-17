@@ -1,11 +1,14 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    env,
     ffi::{OsStr, OsString, c_void},
-    fs,
+    fs::{self, File, OpenOptions},
+    io::Read,
     mem::{size_of, size_of_val},
     os::windows::{
         ffi::{OsStrExt, OsStringExt},
-        fs::MetadataExt,
+        fs::{MetadataExt, OpenOptionsExt},
+        io::AsRawHandle,
     },
     path::{Path, PathBuf},
     ptr::{null, null_mut},
@@ -20,15 +23,18 @@ use windows_sys::Wdk::System::Threading::{
 use windows_sys::Win32::{
     Foundation::{
         CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES,
-        FILETIME, HANDLE, INVALID_HANDLE_VALUE, LocalFree, STILL_ACTIVE, UNICODE_STRING,
-        WAIT_OBJECT_0, WAIT_TIMEOUT,
+        FILETIME, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, LocalFree, STILL_ACTIVE,
+        UNICODE_STRING, WAIT_OBJECT_0, WAIT_TIMEOUT,
     },
     NetworkManagement::IpHelper::{
         GetExtendedTcpTable, MIB_TCP_STATE_LISTEN, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID,
         TCP_TABLE_OWNER_PID_LISTENER,
     },
     Networking::WinSock::AF_INET,
-    Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT,
+    Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileInformationByHandle,
+    },
     Storage::Packaging::Appx::GetPackageFamilyName,
     System::{
         Diagnostics::ToolHelp::{
@@ -49,24 +55,48 @@ use windows_sys::Win32::{
             WaitForSingleObject,
         },
     },
-    UI::Shell::CommandLineToArgvW,
+    UI::{
+        Shell::CommandLineToArgvW,
+        WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindowVisible},
+    },
 };
 
 const OFFICIAL_PACKAGE_FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
 const PROCESS_SYNCHRONIZE_ACCESS: u32 = 0x0010_0000;
 const DESCENDANT_QUIESCENCE_DURATION: Duration = Duration::from_secs(5);
-const DROP_DESCENDANT_TIMEOUT: Duration = Duration::from_secs(10);
+const DESCENDANT_CLEANUP_TIMEOUT: Duration = Duration::from_secs(30);
+const RETAINED_ROOT_MARKER: &str = ".codex-administrator-retained-root-v1";
+const RETAINED_ROOT_LOCK: &str = ".codex-administrator.lock";
+const MAX_NATIVE_AUTH_BYTES: u64 = 1024 * 1024;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct NativeAuthSnapshot {
+    file_index: u64,
+    last_write_high: u32,
+    last_write_low: u32,
+    len: u64,
+    link_count: u32,
+    volume_serial: u32,
+}
 
 use crate::{
-    DirectCdpTarget, DirectIsolationContract, DirectRuntimeBackend, GrokNativeProviderConfig,
-    install_grok_native_provider,
+    DirectCdpTarget, DirectIsolationContract, DirectRuntimeBackend, GROK_NATIVE_PROVIDER_ID,
+    GrokNativeProviderConfig, InjectedModelDescriptor, environment_variable_is_sensitive,
+    install_grok_native_model_catalog, install_grok_native_provider, install_isolated_sqlite_home,
+    remove_grok_native_model_catalog, remove_grok_native_provider, sync_native_session_snapshots,
 };
 
 pub struct WindowsDirectRuntime {
     root: PathBuf,
     provider: Option<GrokNativeProviderConfig>,
+    injected_models: Vec<InjectedModelDescriptor>,
     job: Option<OwnedJob>,
     owns_root: bool,
+    retain_root: bool,
+    sync_native_auth: bool,
+    sync_native_sessions: bool,
+    blocked_environment_keys: BTreeSet<String>,
+    root_lock: Option<fs::File>,
     cdp: crate::LoopbackCdpClient,
 }
 
@@ -133,6 +163,16 @@ pub fn validate_launchable_official_chatgpt_executable(path: &Path) -> Result<()
     Ok(())
 }
 
+pub fn select_latest_official_package_candidate<'a>(
+    candidates: impl IntoIterator<Item = &'a PathBuf>,
+) -> Option<PathBuf> {
+    candidates
+        .into_iter()
+        .filter_map(|path| official_package_version(path).map(|version| (version, path.clone())))
+        .max_by_key(|(version, _)| *version)
+        .map(|(_, path)| path)
+}
+
 pub fn find_official_chatgpt_executable() -> Result<PathBuf> {
     let mut paths = BTreeMap::<String, PathBuf>::new();
     let mut rejected = Vec::new();
@@ -150,33 +190,179 @@ pub fn find_official_chatgpt_executable() -> Result<PathBuf> {
     }
     match paths.len() {
         1 => Ok(paths.into_values().next().unwrap()),
-        0 => bail!(
-            "unable to locate a running official ChatGPT/Codex package executable; {}",
-            rejected.join(" | ")
-        ),
+        0 => find_installed_official_chatgpt_executable().with_context(|| {
+            let rejected = if rejected.is_empty() {
+                "no running ChatGPT.exe process was found".into()
+            } else {
+                rejected.join(" | ")
+            };
+            format!("unable to locate an installed official ChatGPT/Codex package; {rejected}")
+        }),
         _ => bail!("multiple official ChatGPT/Codex package versions are running"),
     }
 }
 
+pub fn find_installed_official_chatgpt_executable() -> Result<PathBuf> {
+    let program_files = env::var_os("ProgramW6432")
+        .or_else(|| env::var_os("ProgramFiles"))
+        .ok_or_else(|| anyhow::anyhow!("Program Files is unavailable"))?;
+    let windows_apps = PathBuf::from(program_files).join("WindowsApps");
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(&windows_apps).with_context(|| {
+        format!(
+            "failed to enumerate the Windows package root {}",
+            windows_apps.display()
+        )
+    })? {
+        let entry = entry?;
+        let candidate = entry.path().join("app").join("ChatGPT.exe");
+        if candidate.is_file()
+            && validate_launchable_official_chatgpt_executable(&candidate).is_ok()
+        {
+            candidates.push(candidate);
+        }
+    }
+    let candidate = select_latest_official_package_candidate(candidates.iter())
+        .ok_or_else(|| anyhow::anyhow!("no valid OpenAI.Codex package executable was found"))?;
+    validate_launchable_official_chatgpt_executable(&candidate)?;
+    Ok(candidate)
+}
+
+fn official_package_version(path: &Path) -> Option<[u64; 4]> {
+    let package = path
+        .parent()?
+        .parent()?
+        .file_name()?
+        .to_str()?
+        .strip_prefix("OpenAI.Codex_")?
+        .strip_suffix("__2p2nqsd0c76g0")?;
+    let (version, architecture) = package.rsplit_once('_')?;
+    if architecture.is_empty() {
+        return None;
+    }
+    let parts = version
+        .split('.')
+        .map(str::parse::<u64>)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .ok()?;
+    if parts.len() != 4 {
+        return None;
+    }
+    Some([parts[0], parts[1], parts[2], parts[3]])
+}
+
 impl WindowsDirectRuntime {
     pub fn new(root: PathBuf, provider: Option<GrokNativeProviderConfig>) -> Result<Self> {
+        Self::new_with_root_options(root, provider, Vec::new(), false, false, false)
+    }
+
+    pub fn new_with_injected_models(
+        root: PathBuf,
+        provider: Option<GrokNativeProviderConfig>,
+        injected_models: Vec<InjectedModelDescriptor>,
+    ) -> Result<Self> {
+        Self::new_with_root_options(root, provider, injected_models, false, false, false)
+    }
+
+    pub fn new_retained(root: PathBuf, provider: Option<GrokNativeProviderConfig>) -> Result<Self> {
+        Self::new_with_root_options(root, provider, Vec::new(), true, false, false)
+    }
+
+    pub fn new_retained_with_injected_models(
+        root: PathBuf,
+        provider: Option<GrokNativeProviderConfig>,
+        injected_models: Vec<InjectedModelDescriptor>,
+    ) -> Result<Self> {
+        Self::new_with_root_options(root, provider, injected_models, true, false, false)
+    }
+
+    pub fn new_retained_with_native_auth_sync(
+        root: PathBuf,
+        provider: Option<GrokNativeProviderConfig>,
+    ) -> Result<Self> {
+        Self::new_with_root_options(root, provider, Vec::new(), true, true, false)
+    }
+
+    pub fn new_retained_with_native_auth_sync_and_injected_models(
+        root: PathBuf,
+        provider: Option<GrokNativeProviderConfig>,
+        injected_models: Vec<InjectedModelDescriptor>,
+    ) -> Result<Self> {
+        Self::new_with_root_options(root, provider, injected_models, true, true, false)
+    }
+
+    pub fn new_retained_with_native_state_sync_and_injected_models(
+        root: PathBuf,
+        provider: Option<GrokNativeProviderConfig>,
+        injected_models: Vec<InjectedModelDescriptor>,
+        sync_native_auth: bool,
+        sync_native_sessions: bool,
+    ) -> Result<Self> {
+        Self::new_with_root_options(
+            root,
+            provider,
+            injected_models,
+            true,
+            sync_native_auth,
+            sync_native_sessions,
+        )
+    }
+
+    fn new_with_root_options(
+        root: PathBuf,
+        provider: Option<GrokNativeProviderConfig>,
+        injected_models: Vec<InjectedModelDescriptor>,
+        retain_root: bool,
+        sync_native_auth: bool,
+        sync_native_sessions: bool,
+    ) -> Result<Self> {
         if !root.is_absolute() {
             bail!("isolated Windows runtime root must be absolute");
         }
         if let Some(provider) = &provider {
             provider.validate()?;
         }
+        if provider.is_none() && !injected_models.is_empty() {
+            bail!("injected model metadata requires a configured provider");
+        }
+        for model in &injected_models {
+            model.validate()?;
+        }
         Ok(Self {
             root,
             provider,
+            injected_models,
             job: None,
             owns_root: false,
+            retain_root,
+            sync_native_auth,
+            sync_native_sessions,
+            blocked_environment_keys: BTreeSet::new(),
+            root_lock: None,
             cdp: crate::LoopbackCdpClient::default(),
         })
     }
 
+    pub fn with_blocked_environment_key(mut self, key: &str) -> Result<Self> {
+        if key.is_empty()
+            || key.len() > 128
+            || key.contains(['=', '\0'])
+            || key.chars().any(char::is_control)
+        {
+            bail!("blocked environment variable name is invalid");
+        }
+        self.blocked_environment_keys
+            .insert(key.to_ascii_uppercase());
+        Ok(self)
+    }
+
     fn remove_owned_root(&mut self) -> Result<()> {
         if !self.owns_root {
+            return Ok(());
+        }
+        self.root_lock.take();
+        if self.retain_root {
+            self.owns_root = false;
             return Ok(());
         }
         reject_reparse_ancestors(&self.root)?;
@@ -221,6 +407,10 @@ impl WindowsDirectRuntime {
 }
 
 impl DirectRuntimeBackend for WindowsDirectRuntime {
+    fn requires_provider_readiness(&self) -> bool {
+        self.provider.is_some()
+    }
+
     fn snapshot_chatgpt_pids(&mut self) -> Result<BTreeSet<u32>> {
         snapshot_processes_named("ChatGPT.exe")
     }
@@ -242,32 +432,98 @@ impl DirectRuntimeBackend for WindowsDirectRuntime {
             )
         })?;
         reject_reparse_ancestors(parent)?;
-        fs::create_dir(&self.root).with_context(|| {
-            format!(
-                "isolated instance root already exists or cannot be owned: {}",
-                self.root.display()
+        if self.retain_root {
+            prepare_retained_root(&self.root)?;
+            self.root_lock = Some(open_retained_root_lock(&self.root)?);
+            terminate_owned_root_references_once(
+                &self.root,
+                Instant::now() + Duration::from_secs(10),
             )
-        })?;
+            .context("failed to clean stale retained-root processes")?;
+        } else {
+            fs::create_dir(&self.root).with_context(|| {
+                format!(
+                    "isolated instance root already exists or cannot be owned: {}",
+                    self.root.display()
+                )
+            })?;
+        }
         self.owns_root = true;
         reject_reparse_ancestors(&self.root)?;
 
         let prepared = (|| -> Result<OwnedJob> {
-            fs::create_dir(contract.isolated_profile()).with_context(|| {
-                format!(
-                    "failed to create isolated profile {}",
-                    contract.isolated_profile().display()
-                )
-            })?;
-            fs::create_dir(contract.isolated_codex_home()).with_context(|| {
-                format!(
-                    "failed to create isolated CODEX_HOME {}",
-                    contract.isolated_codex_home().display()
-                )
-            })?;
+            create_owned_directory(contract.isolated_profile(), self.retain_root).with_context(
+                || {
+                    format!(
+                        "failed to create isolated profile {}",
+                        contract.isolated_profile().display()
+                    )
+                },
+            )?;
+            reject_reparse_ancestors(contract.isolated_profile())?;
+            create_owned_directory(contract.isolated_codex_home(), self.retain_root).with_context(
+                || {
+                    format!(
+                        "failed to create isolated CODEX_HOME {}",
+                        contract.isolated_codex_home().display()
+                    )
+                },
+            )?;
+            reject_reparse_ancestors(contract.isolated_codex_home())?;
+            let config_path = contract.isolated_codex_home().join("config.toml");
+            install_isolated_sqlite_home(
+                &config_path,
+                contract.isolated_codex_home(),
+                &contract.isolated_codex_home().join("sqlite"),
+            )?;
+            if self.sync_native_auth {
+                let provider_credential = match &self.provider {
+                        Some(provider) => Some(env::var_os(&provider.env_key).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "provider credential environment variable is missing during native auth sync"
+                            )
+                        })?),
+                        None => None,
+                    };
+                sync_native_auth_state(
+                    &contract.daily_codex_home().join("auth.json"),
+                    &contract.isolated_codex_home().join("auth.json"),
+                    provider_credential.as_deref(),
+                )?;
+            }
+            if self.sync_native_sessions {
+                sync_native_session_snapshots(
+                    contract.daily_codex_home(),
+                    contract.isolated_codex_home(),
+                    GROK_NATIVE_PROVIDER_ID,
+                )?;
+            }
             if let Some(provider) = &self.provider {
-                install_grok_native_provider(
-                    &contract.isolated_codex_home().join("config.toml"),
-                    provider,
+                if !self.injected_models.is_empty() {
+                    let official_codex_binary = contract
+                        .executable()
+                        .parent()
+                        .ok_or_else(|| anyhow::anyhow!("official executable has no parent"))?
+                        .join("resources")
+                        .join("codex.exe");
+                    reject_reparse_ancestors(&official_codex_binary)?;
+                    install_grok_native_model_catalog(
+                        &official_codex_binary,
+                        &contract
+                            .isolated_codex_home()
+                            .join("grok-native-model-catalog.json"),
+                        &config_path,
+                        &self.injected_models,
+                    )?;
+                }
+                install_grok_native_provider(&config_path, provider)?;
+            } else {
+                remove_grok_native_provider(&config_path)?;
+                remove_grok_native_model_catalog(
+                    &contract
+                        .isolated_codex_home()
+                        .join("grok-native-model-catalog.json"),
+                    &config_path,
                 )?;
             }
             OwnedJob::create(self.root.clone())
@@ -294,10 +550,23 @@ impl DirectRuntimeBackend for WindowsDirectRuntime {
         arguments: &[OsString],
         environment: &[(OsString, OsString)],
     ) -> Result<()> {
+        let allowed_sensitive_key = self
+            .provider
+            .as_ref()
+            .map(|provider| OsStr::new(&provider.env_key));
+        let mut removals = vec![OsString::from("OPENAI_API_KEY")];
+        removals.extend(self.blocked_environment_keys.iter().map(OsString::from));
         self.job
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("isolated Windows runtime is not prepared"))?
-            .launch(executable, arguments, environment, true)
+            .launch(
+                executable,
+                arguments,
+                environment,
+                true,
+                &removals,
+                allowed_sensitive_key,
+            )
     }
 
     fn wait_for_cdp_endpoint(&mut self, port: u16, timeout: Duration) -> Result<()> {
@@ -318,6 +587,15 @@ impl DirectRuntimeBackend for WindowsDirectRuntime {
 
     fn cdp_listener_pid(&mut self, port: u16) -> Result<u32> {
         loopback_listener_pid(port)
+    }
+
+    fn owned_window_open(&mut self) -> Result<bool> {
+        let pids = self
+            .job
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("isolated Windows runtime is not prepared"))?
+            .process_ids()?;
+        owned_visible_window_exists(&pids)
     }
 
     fn install_bootstrap(
@@ -345,6 +623,22 @@ impl DirectRuntimeBackend for WindowsDirectRuntime {
         self.cdp.injection_healthy(target)
     }
 
+    fn drain_control_requests(
+        &mut self,
+        target: &DirectCdpTarget,
+        nonce: &str,
+    ) -> Result<Vec<crate::ControlRequest>> {
+        self.cdp.drain_control_requests(target, nonce)
+    }
+
+    fn deliver_control_response(
+        &mut self,
+        target: &DirectCdpTarget,
+        response: crate::ControlResponse,
+    ) -> Result<()> {
+        self.cdp.deliver_control_response(target, response)
+    }
+
     fn shutdown(&mut self) -> Result<()> {
         let job_result = self.job.take().map(OwnedJob::terminate).unwrap_or(Ok(()));
         let root_result = self.remove_owned_root();
@@ -355,6 +649,208 @@ impl DirectRuntimeBackend for WindowsDirectRuntime {
                 bail!("job cleanup failed: {job}; root cleanup failed: {root}")
             }
         }
+    }
+}
+
+struct OwnedWindowSearch<'a> {
+    pids: &'a BTreeSet<u32>,
+    found: bool,
+}
+
+fn owned_visible_window_exists(pids: &BTreeSet<u32>) -> Result<bool> {
+    if pids.is_empty() {
+        return Ok(false);
+    }
+    let mut search = OwnedWindowSearch { pids, found: false };
+    let result = unsafe {
+        EnumWindows(
+            Some(find_owned_visible_window),
+            &mut search as *mut OwnedWindowSearch<'_> as LPARAM,
+        )
+    };
+    if result == 0 && !search.found {
+        return Err(std::io::Error::last_os_error()).context("failed to enumerate owned windows");
+    }
+    Ok(search.found)
+}
+
+unsafe extern "system" fn find_owned_visible_window(window: HWND, state: LPARAM) -> i32 {
+    let state = unsafe { &mut *(state as *mut OwnedWindowSearch<'_>) };
+    if unsafe { IsWindowVisible(window) } == 0 {
+        return 1;
+    }
+    let mut pid = 0_u32;
+    unsafe { GetWindowThreadProcessId(window, &mut pid) };
+    if state.pids.contains(&pid) {
+        state.found = true;
+        return 0;
+    }
+    1
+}
+
+fn prepare_retained_root(root: &Path) -> Result<()> {
+    match fs::create_dir(root) {
+        Ok(()) => {
+            fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(root.join(RETAINED_ROOT_MARKER))
+                .with_context(|| {
+                    format!("failed to mark retained isolated root {}", root.display())
+                })?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            reject_reparse_ancestors(root)?;
+            let marker = root.join(RETAINED_ROOT_MARKER);
+            let metadata = fs::symlink_metadata(&marker).with_context(|| {
+                format!(
+                    "retained isolated root is missing its ownership marker: {}",
+                    root.display()
+                )
+            })?;
+            if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            {
+                bail!("retained isolated root ownership marker is invalid");
+            }
+        }
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to prepare retained isolated root {}",
+                    root.display()
+                )
+            });
+        }
+    }
+    reject_reparse_ancestors(root)
+}
+
+fn open_retained_root_lock(root: &Path) -> Result<fs::File> {
+    let path = root.join(RETAINED_ROOT_LOCK);
+    if path.exists() {
+        let metadata = fs::symlink_metadata(&path)?;
+        if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            bail!("retained isolated root lock path is invalid");
+        }
+    }
+    fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .open(&path)
+        .with_context(|| {
+            format!(
+                "retained isolated root is already active or cannot be locked: {}",
+                root.display()
+            )
+        })
+}
+
+fn create_owned_directory(path: &Path, allow_existing: bool) -> std::io::Result<()> {
+    if allow_existing {
+        fs::create_dir_all(path)
+    } else {
+        fs::create_dir(path)
+    }
+}
+
+fn sync_native_auth_state(
+    source: &Path,
+    destination: &Path,
+    provider_credential: Option<&OsStr>,
+) -> Result<()> {
+    reject_reparse_ancestors(source)?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(source)
+        .with_context(|| {
+            format!(
+                "daily native authentication state is missing: {}",
+                source.display()
+            )
+        })?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        bail!("daily native authentication state is not a regular file");
+    }
+    let initial = native_auth_snapshot(&file)?;
+    if initial.link_count != 1 {
+        bail!("daily native authentication state must not be a hard link");
+    }
+    if initial.len == 0 || initial.len > MAX_NATIVE_AUTH_BYTES {
+        bail!("daily native authentication state has an invalid size");
+    }
+
+    let mut content = Vec::new();
+    Read::by_ref(&mut file)
+        .take(MAX_NATIVE_AUTH_BYTES + 1)
+        .read_to_end(&mut content)
+        .with_context(|| {
+            format!(
+                "failed to read daily native auth state {}",
+                source.display()
+            )
+        })?;
+    if content.len() as u64 != initial.len || content.len() as u64 > MAX_NATIVE_AUTH_BYTES {
+        bail!("daily native authentication state changed during import");
+    }
+    if native_auth_snapshot(&file)? != initial {
+        bail!("daily native authentication state changed during import");
+    }
+    let parsed: serde_json::Value = serde_json::from_slice(&content)
+        .context("daily native authentication state is not valid JSON")?;
+    if parsed.as_object().is_none_or(|object| object.is_empty()) {
+        bail!("daily native authentication state must be a non-empty JSON object");
+    }
+    if let Some(provider_credential) = provider_credential {
+        let provider_credential = provider_credential
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("provider credential is not valid Unicode"))?;
+        if provider_credential.is_empty() {
+            bail!("provider credential is empty during native auth sync");
+        }
+        if json_contains_string_fragment(&parsed, provider_credential) {
+            bail!("daily native authentication state contains the provider credential");
+        }
+    }
+
+    crate::install_bootstrap_atomically(destination, &content)
+        .context("failed to atomically sync native authentication state")?;
+    Ok(())
+}
+
+fn native_auth_snapshot(file: &File) -> Result<NativeAuthSnapshot> {
+    let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle() as HANDLE, &mut information) } == 0
+    {
+        return Err(std::io::Error::last_os_error())
+            .context("failed to resolve daily native authentication file identity");
+    }
+    Ok(NativeAuthSnapshot {
+        file_index: (u64::from(information.nFileIndexHigh) << 32)
+            | u64::from(information.nFileIndexLow),
+        last_write_high: information.ftLastWriteTime.dwHighDateTime,
+        last_write_low: information.ftLastWriteTime.dwLowDateTime,
+        len: (u64::from(information.nFileSizeHigh) << 32) | u64::from(information.nFileSizeLow),
+        link_count: information.nNumberOfLinks,
+        volume_serial: information.dwVolumeSerialNumber,
+    })
+}
+
+fn json_contains_string_fragment(value: &serde_json::Value, expected: &str) -> bool {
+    match value {
+        serde_json::Value::String(value) => value.contains(expected),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| json_contains_string_fragment(value, expected)),
+        serde_json::Value::Object(values) => values
+            .values()
+            .any(|value| json_contains_string_fragment(value, expected)),
+        _ => false,
     }
 }
 
@@ -482,13 +978,15 @@ impl OwnedJob {
         arguments: &[OsString],
         environment: &[(OsString, OsString)],
         verify_official: bool,
+        removals: &[OsString],
+        allowed_sensitive_key: Option<&OsStr>,
     ) -> Result<()> {
         if verify_official {
             validate_launchable_official_chatgpt_executable(executable)?;
         }
         let mut application = wide_null(executable.as_os_str());
         let mut command_line = windows_command_line(executable.as_os_str(), arguments);
-        let environment = windows_environment_block(environment)?;
+        let environment = windows_environment_block(environment, removals, allowed_sensitive_key)?;
         let current_directory = executable
             .parent()
             .map(|path| wide_null(path.as_os_str()))
@@ -642,7 +1140,6 @@ impl OwnedJob {
     }
 
     fn terminate(mut self) -> Result<()> {
-        let deadline = Instant::now() + Duration::from_secs(10);
         let initial_capture_error = match self.capture_descendants(true) {
             Ok(_) if self.uncertain_pids.is_empty() => None,
             Ok(_) => Some(anyhow::anyhow!(
@@ -652,6 +1149,7 @@ impl OwnedJob {
             )),
             Err(error) => Some(error),
         };
+        let deadline = Instant::now() + DESCENDANT_CLEANUP_TIMEOUT;
         let terminated = unsafe { TerminateJobObject(self.handle, 0) };
         let terminate_error = if terminated == 0 {
             Some(std::io::Error::last_os_error())
@@ -699,8 +1197,8 @@ impl Drop for OwnedJob {
         if self.handle.is_null() {
             return;
         }
-        let deadline = Instant::now() + DROP_DESCENDANT_TIMEOUT;
         let _ = self.capture_descendants(true);
+        let deadline = Instant::now() + DESCENDANT_CLEANUP_TIMEOUT;
         unsafe {
             TerminateJobObject(self.handle, 0);
         }
@@ -883,8 +1381,17 @@ fn descendant_entry_needs_retry(_parent_pid_known: bool, generation_matched: boo
     !generation_matched
 }
 
-fn unresolved_descendant_requires_lineage_anchor(parent_pid_known: bool) -> bool {
-    parent_pid_known
+fn unresolved_descendant_requires_lineage_anchor(
+    parent_generations: Option<&[ProcessGeneration]>,
+    child_created_at: Option<u64>,
+) -> bool {
+    parent_generations.is_some_and(|parents| {
+        child_created_at.is_none_or(|child_created_at| {
+            parents
+                .iter()
+                .any(|parent| child_created_at >= parent.created_at)
+        })
+    })
 }
 
 fn snapshot_generation_precedes_capture(created_at: u64, snapshot_at: u64) -> bool {
@@ -1002,6 +1509,7 @@ fn capture_descendant_handles(
                 && entry.pid != entry.parent_pid
                 && !active_uncertain_lineage.contains(&entry.pid)
         })
+        .map(|entry| (entry, None))
         .collect::<Vec<_>>();
     let mut discovered = BTreeMap::<ProcessIdentity, TrackedProcess>::new();
     let mut added = root_added;
@@ -1012,11 +1520,11 @@ fn capture_descendant_handles(
     loop {
         let mut advanced = false;
         let mut remaining = Vec::new();
-        for entry in pending {
+        for (entry, child_created_at) in pending {
             let parent_pid_known = generations.contains_key(&entry.parent_pid);
             if !parent_pid_known {
                 if descendant_entry_needs_retry(false, false) {
-                    remaining.push(entry);
+                    remaining.push((entry, child_created_at));
                 }
                 continue;
             }
@@ -1072,7 +1580,7 @@ fn capture_descendant_handles(
             if !belongs {
                 drop(opened);
                 if descendant_entry_needs_retry(true, false) {
-                    remaining.push(entry);
+                    remaining.push((entry, Some(generation.created_at)));
                 }
                 continue;
             }
@@ -1097,9 +1605,10 @@ fn capture_descendant_handles(
             advanced = true;
         }
         if !advanced {
-            for entry in remaining {
+            for (entry, child_created_at) in remaining {
                 if unresolved_descendant_requires_lineage_anchor(
-                    generations.contains_key(&entry.parent_pid),
+                    generations.get(&entry.parent_pid).map(Vec::as_slice),
+                    child_created_at,
                 ) {
                     new_lineage_anchors.insert(entry.pid);
                     visible_lineage_anchors.insert(entry.pid);
@@ -2299,10 +2808,28 @@ fn quote_windows_argument(argument: &OsStr) -> String {
     quoted
 }
 
-fn windows_environment_block(overrides: &[(OsString, OsString)]) -> Result<Vec<u16>> {
+fn windows_environment_block(
+    overrides: &[(OsString, OsString)],
+    removals: &[OsString],
+    allowed_sensitive_key: Option<&OsStr>,
+) -> Result<Vec<u16>> {
     let mut environment = BTreeMap::<String, (OsString, OsString)>::new();
+    let allowed_sensitive_key =
+        allowed_sensitive_key.map(|key| key.to_string_lossy().to_ascii_uppercase());
     for (key, value) in std::env::vars_os() {
-        environment.insert(key.to_string_lossy().to_uppercase(), (key, value));
+        let normalized = key.to_string_lossy().to_ascii_uppercase();
+        if environment_variable_is_sensitive(&key)
+            && allowed_sensitive_key.as_deref() != Some(normalized.as_str())
+        {
+            continue;
+        }
+        environment.insert(normalized, (key, value));
+    }
+    for key in removals {
+        if key.is_empty() || key.to_string_lossy().contains(['=', '\0']) {
+            bail!("isolated process environment removal is invalid");
+        }
+        environment.remove(&key.to_string_lossy().to_uppercase());
     }
     for (key, value) in overrides {
         if key.is_empty()
@@ -2311,10 +2838,13 @@ fn windows_environment_block(overrides: &[(OsString, OsString)]) -> Result<Vec<u
         {
             bail!("isolated process environment override is invalid");
         }
-        environment.insert(
-            key.to_string_lossy().to_uppercase(),
-            (key.clone(), value.clone()),
-        );
+        let normalized = key.to_string_lossy().to_ascii_uppercase();
+        if environment_variable_is_sensitive(key)
+            && allowed_sensitive_key.as_deref() != Some(normalized.as_str())
+        {
+            bail!("isolated process environment override contains an unapproved secret");
+        }
+        environment.insert(normalized, (key.clone(), value.clone()));
     }
     let mut block = Vec::new();
     for (_, (key, value)) in environment {
@@ -2351,6 +2881,69 @@ mod tests {
             CloseHandle(handle);
         }
         read && exit_code == STILL_ACTIVE as u32
+    }
+
+    #[test]
+    fn isolated_environment_removes_native_openai_key_and_explicit_parent_variables() {
+        let block = windows_environment_block(
+            &[(
+                OsString::from("CODEX_ADMINISTRATOR_PROVIDER_API_KEY"),
+                OsString::from("test-provider-secret"),
+            )],
+            &[OsString::from("OPENAI_API_KEY"), OsString::from("PATH")],
+            Some(OsStr::new("CODEX_ADMINISTRATOR_PROVIDER_API_KEY")),
+        )
+        .unwrap();
+        let entries = block
+            .split(|unit| *unit == 0)
+            .take_while(|entry| !entry.is_empty())
+            .map(|entry| String::from_utf16(entry).unwrap())
+            .collect::<Vec<_>>();
+
+        assert!(
+            entries.iter().any(|entry| {
+                entry == "CODEX_ADMINISTRATOR_PROVIDER_API_KEY=test-provider-secret"
+            })
+        );
+        assert!(
+            !entries
+                .iter()
+                .any(|entry| { entry.to_ascii_uppercase().starts_with("OPENAI_API_KEY=") })
+        );
+        assert!(
+            !entries
+                .iter()
+                .any(|entry| entry.to_ascii_uppercase().starts_with("PATH="))
+        );
+    }
+
+    #[test]
+    fn management_environment_rejects_unapproved_provider_secret_overrides() {
+        assert!(
+            windows_environment_block(
+                &[(
+                    OsString::from("XAI_API_KEY"),
+                    OsString::from("must-not-reach-management"),
+                )],
+                &[],
+                None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn native_auth_sync_rejects_the_provider_credential() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("daily-auth.json");
+        let destination = temp.path().join("isolated").join("auth.json");
+        fs::write(&source, br#"{"OPENAI_API_KEY":"provider-secret"}"#).unwrap();
+
+        let result =
+            sync_native_auth_state(&source, &destination, Some(OsStr::new("provider-secret")));
+
+        assert!(result.is_err());
+        assert!(!destination.exists());
     }
 
     #[test]
@@ -2446,9 +3039,28 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_child_of_a_known_parent_requires_a_temporary_anchor() {
-        assert!(unresolved_descendant_requires_lineage_anchor(true));
-        assert!(!unresolved_descendant_requires_lineage_anchor(false));
+    fn unresolved_child_requires_a_plausible_parent_generation_for_a_temporary_anchor() {
+        let parents = [ProcessGeneration {
+            created_at: 100,
+            exited_at: Some(200),
+        }];
+
+        assert!(unresolved_descendant_requires_lineage_anchor(
+            Some(&parents),
+            Some(150)
+        ));
+        assert!(unresolved_descendant_requires_lineage_anchor(
+            Some(&parents),
+            Some(250)
+        ));
+        assert!(!unresolved_descendant_requires_lineage_anchor(
+            Some(&parents),
+            Some(50)
+        ));
+        assert!(!unresolved_descendant_requires_lineage_anchor(
+            None,
+            Some(150)
+        ));
     }
 
     #[test]
@@ -2776,7 +3388,7 @@ mod tests {
 
     #[test]
     fn drop_cleanup_timeout_exceeds_the_required_quiescence_window() {
-        assert!(DROP_DESCENDANT_TIMEOUT > DESCENDANT_QUIESCENCE_DURATION);
+        assert!(DESCENDANT_CLEANUP_TIMEOUT >= DESCENDANT_QUIESCENCE_DURATION.saturating_mul(4));
     }
 
     #[test]
@@ -2999,6 +3611,23 @@ mod tests {
     }
 
     #[test]
+    fn native_auth_sync_rejects_a_provider_credential_embedded_in_an_auth_value() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("daily-auth.json");
+        let destination = temp.path().join("isolated").join("auth.json");
+        fs::write(&source, br#"{"token":"Bearer provider-secret-for-test"}"#).unwrap();
+
+        let result = sync_native_auth_state(
+            &source,
+            &destination,
+            Some(OsStr::new("provider-secret-for-test")),
+        );
+
+        assert!(result.is_err());
+        assert!(!destination.exists());
+    }
+
+    #[test]
     fn descendant_cleanup_reports_a_transient_inaccessible_process() {
         let mut descendants = BTreeMap::new();
         let mut captures = 0;
@@ -3038,6 +3667,8 @@ mod tests {
             ],
             &[],
             false,
+            &[],
+            None,
         )
         .unwrap();
 

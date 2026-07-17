@@ -122,7 +122,7 @@ fn direct_no_launch_rejects_a_non_launchable_fixture_without_writing_or_exposing
             "--host",
             "direct",
             "--model",
-            "grok-4",
+            "grok-4.5",
             "--base-url",
             "https://api.x.ai/v1",
             "--env-key",
@@ -175,7 +175,7 @@ fn direct_preflight_fails_before_writing_when_the_credential_environment_is_miss
             "--host",
             "direct",
             "--model",
-            "grok-4",
+            "grok-4.5",
             "--base-url",
             "https://api.x.ai/v1",
             "--env-key",
@@ -200,6 +200,56 @@ fn direct_preflight_fails_before_writing_when_the_credential_environment_is_miss
             "required provider credential environment variable MISSING_GROK_KEY is not set"
         )
     );
+    assert!(!root.exists());
+}
+
+#[test]
+fn direct_management_only_preflight_does_not_require_a_provider_credential() {
+    let temp = tempdir().unwrap();
+    let official = temp
+        .path()
+        .join("Program Files")
+        .join("WindowsApps")
+        .join("OpenAI.Codex_test_x64__2p2nqsd0c76g0")
+        .join("app")
+        .join("ChatGPT.exe");
+    fs::create_dir_all(official.parent().unwrap()).unwrap();
+    fs::write(&official, b"not launched").unwrap();
+    let root = temp
+        .path()
+        .join("CodexAdministrator")
+        .join("instances")
+        .join("management-only");
+    let output = Command::new(env!("CARGO_BIN_EXE_codex-administrator"))
+        .args([
+            "inject",
+            "--host",
+            "direct",
+            "--base-url",
+            "https://ai.hebox.net/v1",
+            "--env-key",
+            "MISSING_GROK_KEY",
+            "--official-path",
+        ])
+        .arg(&official)
+        .arg("--instance-root")
+        .arg(&root)
+        .arg("--daily-profile")
+        .arg(temp.path().join("daily-profile"))
+        .arg("--daily-codex-home")
+        .arg(temp.path().join("daily-codex-home"))
+        .args(["--cdp-port", "9341", "--no-launch"])
+        .env_remove("MISSING_GROK_KEY")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("direct launch is restricted"),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(!stderr.contains("required provider credential"));
     assert!(!root.exists());
 }
 
@@ -279,7 +329,7 @@ fn unknown_codex_plus_binary_falls_back_natively_and_removes_stale_injection() {
             "--host",
             "codexplusplus",
             "--model",
-            "grok-4",
+            "grok-4.5",
             "--codex-plus-path",
             env!("CARGO_BIN_EXE_codex-administrator"),
             "--appdata",
@@ -300,4 +350,44 @@ fn unknown_codex_plus_binary_falls_back_natively_and_removes_stale_injection() {
     assert_eq!(report["reason"], "unverified_host_identity");
     assert!(!scripts.join("codex-administrator-bootstrap.js").exists());
     assert_eq!(fs::read(scripts.join("other.js")).unwrap(), b"preserve");
+}
+
+#[test]
+fn unverified_codex_plus_disables_renderer_addons_before_source_probing() {
+    let temp = tempdir().unwrap();
+    let appdata = temp.path().join("AppData").join("Roaming");
+    let missing_skin = temp.path().join("missing-codex-dream-skin");
+    let addon = format!("codex-dream-skin={}", missing_skin.display());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_codex-administrator"))
+        .args([
+            "inject",
+            "--host",
+            "codexplusplus",
+            "--model",
+            "grok-4.5",
+            "--renderer-addon",
+            &addon,
+            "--codex-plus-path",
+        ])
+        .arg(env!("CARGO_BIN_EXE_codex-administrator"))
+        .arg("--appdata")
+        .arg(&appdata)
+        .arg("--no-launch")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "native_fallback");
+    assert_eq!(report["renderer_addons"][0]["id"], "codex-dream-skin");
+    assert_eq!(report["renderer_addons"][0]["state"], "disabled");
+    assert_eq!(
+        report["renderer_addons"][0]["reason"],
+        "host_adapter_unsupported"
+    );
 }

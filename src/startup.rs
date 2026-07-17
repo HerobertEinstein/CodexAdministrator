@@ -26,6 +26,17 @@ pub fn prepare_codex_plus_host(
     bootstrap_config: &BootstrapConfig,
 ) -> Result<CodexPlusPreparation> {
     let script = render_bootstrap(bootstrap_config)?;
+    prepare_codex_plus_host_script(appdata, &script)
+}
+
+pub fn codex_plus_launch_allowed(no_launch: bool, outcome: &CodexPlusStartupOutcome) -> bool {
+    !no_launch && outcome.decision.injection_enabled() && outcome.bootstrap.is_some()
+}
+
+pub fn prepare_codex_plus_host_script(
+    appdata: &Path,
+    script: &str,
+) -> Result<CodexPlusPreparation> {
     let bootstrap_path = codex_plus_bootstrap_path(appdata);
     let sha256 = install_bootstrap_atomically(&bootstrap_path, script.as_bytes())?;
     enable_codex_plus_bootstrap(&appdata.join("Codex++").join("user_scripts.json"))?;
@@ -41,13 +52,34 @@ pub fn prepare_codex_plus_host_guarded(
     identity: Option<&HostIdentity>,
     policy: &CompatibilityPolicy,
 ) -> CodexPlusStartupOutcome {
+    let script = match render_bootstrap(bootstrap_config) {
+        Ok(script) => script,
+        Err(error) => {
+            return CodexPlusStartupOutcome {
+                decision: CompatibilityDecision::NativeOnly {
+                    reason: "bootstrap_prepare_failed".into(),
+                },
+                bootstrap: None,
+                isolation_error: Some(format!("bootstrap rendering failed: {error}")),
+            };
+        }
+    };
+    prepare_codex_plus_host_script_guarded(appdata, &script, identity, policy)
+}
+
+pub fn prepare_codex_plus_host_script_guarded(
+    appdata: &Path,
+    script: &str,
+    identity: Option<&HostIdentity>,
+    policy: &CompatibilityPolicy,
+) -> CodexPlusStartupOutcome {
     let identity_sha256 = identity
         .filter(|identity| identity.adapter == HostAdapterKind::CodexPlusPlus)
         .map(|identity| identity.sha256.as_str());
     let decision = policy.evaluate(HostAdapterKind::CodexPlusPlus, identity_sha256);
 
     if decision.injection_enabled() {
-        match prepare_codex_plus_host(appdata, bootstrap_config) {
+        match prepare_codex_plus_host_script(appdata, script) {
             Ok(bootstrap) => {
                 return CodexPlusStartupOutcome {
                     decision,

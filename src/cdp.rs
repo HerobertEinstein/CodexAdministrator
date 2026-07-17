@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tungstenite::{Message, WebSocket};
 
-use crate::DirectCdpTarget;
+use crate::{ControlRequest, ControlResponse, DirectCdpTarget, parse_control_requests};
 
 const HEALTH_EXPRESSION: &str = "(() => { try { return window.__codexAdministrator?.health?.() ?? null; } catch { return null; } })()";
 const PROVIDER_READY_EXPRESSION: &str = include_str!("../assets/provider-readiness.js");
@@ -100,6 +100,39 @@ impl LoopbackCdpClient {
         target.validate_for_port(port)?;
         let mut session = CdpSession::connect(target, self.request_timeout)?;
         Ok(health_is_ready(&session.evaluate(HEALTH_EXPRESSION)?))
+    }
+
+    pub fn drain_control_requests(
+        &self,
+        target: &DirectCdpTarget,
+        nonce: &str,
+    ) -> Result<Vec<ControlRequest>> {
+        let port = target_port(target)?;
+        target.validate_for_port(port)?;
+        let nonce = serde_json::to_string(nonce)?;
+        let expression =
+            format!("(() => window.__codexAdministratorControlInternal?.drain?.({nonce}) ?? [])()");
+        let mut session = CdpSession::connect(target, self.request_timeout)?;
+        let mut value = session.evaluate(&expression)?;
+        parse_control_requests(&mut value, nonce.trim_matches('"'))
+    }
+
+    pub fn deliver_control_response(
+        &self,
+        target: &DirectCdpTarget,
+        response: ControlResponse,
+    ) -> Result<()> {
+        let port = target_port(target)?;
+        target.validate_for_port(port)?;
+        let response = serde_json::to_string(&response.into_value())?;
+        let expression = format!(
+            "(() => Boolean(window.__codexAdministratorControlInternal?.deliver?.({response})))()"
+        );
+        let mut session = CdpSession::connect(target, self.request_timeout)?;
+        if session.evaluate(&expression)?.as_bool() != Some(true) {
+            bail!("isolated renderer rejected the control response");
+        }
+        Ok(())
     }
 
     pub fn wait_for_ui_ready(&self, target: &DirectCdpTarget, timeout: Duration) -> Result<()> {
@@ -246,7 +279,7 @@ impl CdpSession {
             let Some(text) = message.to_text().ok() else {
                 continue;
             };
-            let response: Value = serde_json::from_str(text)
+            let mut response: Value = serde_json::from_str(text)
                 .context("isolated CDP websocket returned invalid JSON")?;
             if response.get("id").and_then(Value::as_u64) != Some(id) {
                 continue;
@@ -274,8 +307,8 @@ impl CdpSession {
                 bail!("isolated renderer evaluation failed: {message}");
             }
             return Ok(response
-                .pointer("/result/result/value")
-                .cloned()
+                .pointer_mut("/result/result/value")
+                .map(Value::take)
                 .unwrap_or(Value::Null));
         }
     }

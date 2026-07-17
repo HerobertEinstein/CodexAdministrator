@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{Result, bail};
 use codex_administrator::{
-    DirectCdpTarget, DirectInstance, DirectIsolationContract, DirectMaintenance,
+    ControlResponse, DirectCdpTarget, DirectInstance, DirectIsolationContract, DirectMaintenance,
     DirectRuntimeBackend,
 };
 
@@ -47,8 +47,12 @@ struct FakeState {
     current_target: Option<DirectCdpTarget>,
     healthy: bool,
     fail_health: bool,
+    fail_control_drain: bool,
+    fail_control_delivery: bool,
     fail_target_wait: bool,
     fail_provider_ready: bool,
+    provider_readiness_required: bool,
+    window_open: bool,
     shutdowns: usize,
 }
 
@@ -65,8 +69,12 @@ impl FakeRuntime {
                 current_target: None,
                 healthy: true,
                 fail_health: false,
+                fail_control_drain: false,
+                fail_control_delivery: false,
                 fail_target_wait: false,
                 fail_provider_ready: false,
+                provider_readiness_required: true,
+                window_open: true,
                 shutdowns: 0,
             })),
         }
@@ -84,9 +92,18 @@ impl FakeRuntime {
         self.state.lock().unwrap().cdp_listener_pid = pid;
         self
     }
+
+    fn without_provider(self) -> Self {
+        self.state.lock().unwrap().provider_readiness_required = false;
+        self
+    }
 }
 
 impl DirectRuntimeBackend for FakeRuntime {
+    fn requires_provider_readiness(&self) -> bool {
+        self.state.lock().unwrap().provider_readiness_required
+    }
+
     fn snapshot_chatgpt_pids(&mut self) -> Result<BTreeSet<u32>> {
         let mut state = self.state.lock().unwrap();
         state.events.push("snapshot".into());
@@ -109,12 +126,20 @@ impl DirectRuntimeBackend for FakeRuntime {
     ) -> Result<()> {
         assert_eq!(
             environment,
-            [(
-                OsString::from("CODEX_HOME"),
-                OsString::from(
-                    r"C:\Users\Example\AppData\Local\CodexAdministrator\instance\codex-home"
+            [
+                (
+                    OsString::from("CODEX_HOME"),
+                    OsString::from(
+                        r"C:\Users\Example\AppData\Local\CodexAdministrator\instance\codex-home"
+                    ),
                 ),
-            )]
+                (
+                    OsString::from("CODEX_SQLITE_HOME"),
+                    OsString::from(
+                        r"C:\Users\Example\AppData\Local\CodexAdministrator\instance\codex-home\sqlite"
+                    ),
+                ),
+            ]
         );
         let stage = if arguments.last() == Some(&OsString::from("--new-window")) {
             "activation"
@@ -164,6 +189,10 @@ impl DirectRuntimeBackend for FakeRuntime {
         Ok(state.cdp_listener_pid)
     }
 
+    fn owned_window_open(&mut self) -> Result<bool> {
+        Ok(self.state.lock().unwrap().window_open)
+    }
+
     fn install_bootstrap(
         &mut self,
         target: &DirectCdpTarget,
@@ -207,6 +236,32 @@ impl DirectRuntimeBackend for FakeRuntime {
             bail!("renderer health connection unavailable");
         }
         Ok(state.healthy)
+    }
+
+    fn drain_control_requests(
+        &mut self,
+        _target: &DirectCdpTarget,
+        _nonce: &str,
+    ) -> Result<Vec<codex_administrator::ControlRequest>> {
+        let mut state = self.state.lock().unwrap();
+        state.events.push("control:drain".into());
+        if state.fail_control_drain {
+            bail!("renderer control drain connection unavailable");
+        }
+        Ok(Vec::new())
+    }
+
+    fn deliver_control_response(
+        &mut self,
+        _target: &DirectCdpTarget,
+        _response: ControlResponse,
+    ) -> Result<()> {
+        let mut state = self.state.lock().unwrap();
+        state.events.push("control:deliver".into());
+        if state.fail_control_delivery {
+            bail!("renderer control delivery connection unavailable");
+        }
+        Ok(())
     }
 
     fn shutdown(&mut self) -> Result<()> {
@@ -374,6 +429,33 @@ fn a_transient_missing_reload_target_does_not_close_the_owned_instance() {
 }
 
 #[test]
+fn closing_the_owned_window_is_a_clean_exit_instead_of_a_reload_failure() {
+    let runtime = FakeRuntime::new(
+        BTreeSet::from([100]),
+        BTreeSet::from([100, 400]),
+        BTreeSet::from([400]),
+    );
+    let observer = runtime.clone();
+    let mut instance = DirectInstance::start(
+        contract(),
+        "bootstrap();".into(),
+        runtime,
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    {
+        let mut state = observer.state.lock().unwrap();
+        state.fail_target_wait = true;
+        state.window_open = false;
+    }
+
+    assert_eq!(instance.maintain_once().unwrap(), DirectMaintenance::Exited);
+    assert_eq!(observer.shutdowns(), 0);
+    instance.shutdown().unwrap();
+    assert_eq!(observer.shutdowns(), 1);
+}
+
+#[test]
 fn a_transient_reload_health_disconnect_does_not_close_the_owned_instance() {
     let runtime = FakeRuntime::new(
         BTreeSet::from([100]),
@@ -401,6 +483,49 @@ fn a_transient_reload_health_disconnect_does_not_close_the_owned_instance() {
     assert_eq!(
         instance.maintain_once().unwrap(),
         DirectMaintenance::Reinjected
+    );
+    assert_eq!(observer.shutdowns(), 0);
+}
+
+#[test]
+fn transient_control_transport_disconnects_do_not_close_the_owned_instance() {
+    let runtime = FakeRuntime::new(
+        BTreeSet::from([100]),
+        BTreeSet::from([100, 400]),
+        BTreeSet::from([400]),
+    );
+    let observer = runtime.clone();
+    let mut instance = DirectInstance::start(
+        contract(),
+        "bootstrap();".into(),
+        runtime,
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    {
+        let mut state = observer.state.lock().unwrap();
+        state.fail_control_drain = true;
+        state.fail_control_delivery = true;
+    }
+
+    assert!(instance.drain_control_requests("nonce").unwrap().is_empty());
+    instance
+        .deliver_control_response(ControlResponse::success(
+            "request",
+            "nonce",
+            serde_json::json!({}),
+        ))
+        .unwrap();
+    assert_eq!(observer.shutdowns(), 0);
+
+    {
+        let mut state = observer.state.lock().unwrap();
+        state.fail_control_drain = false;
+        state.fail_control_delivery = false;
+    }
+    assert_eq!(
+        instance.maintain_once().unwrap(),
+        DirectMaintenance::Healthy
     );
     assert_eq!(observer.shutdowns(), 0);
 }
@@ -478,6 +603,30 @@ fn an_unresolved_native_provider_fails_closed_before_ready() {
 
     assert!(error.to_string().contains("grok_native"));
     assert!(observer.events().contains(&"provider:initial".into()));
+    assert_eq!(observer.shutdowns(), 1);
+}
+
+#[test]
+fn management_only_startup_skips_native_provider_readiness() {
+    let runtime = FakeRuntime::new(
+        BTreeSet::from([100]),
+        BTreeSet::from([100, 400]),
+        BTreeSet::from([400]),
+    )
+    .without_provider();
+    runtime.state.lock().unwrap().fail_provider_ready = true;
+    let observer = runtime.clone();
+
+    let instance = DirectInstance::start(
+        contract(),
+        "bootstrap();".into(),
+        runtime,
+        Duration::from_secs(1),
+    )
+    .unwrap();
+
+    assert!(!observer.events().contains(&"provider:initial".into()));
+    drop(instance);
     assert_eq!(observer.shutdowns(), 1);
 }
 

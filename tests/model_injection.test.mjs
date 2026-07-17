@@ -71,18 +71,46 @@ test("a configured native model-id collision never reroutes the native model", a
   const configuredCollision = { ...grokModel, id: "gpt-5.4", model: "gpt-5.4" };
   const response = { data: [native] };
   const routableGrokModels = new Set(["gpt-5.4"]);
+  const conflictingModels = new Set();
   const request = {
     type: "mcp-request",
     request: { id: 9, method: "thread/start", params: { model: "gpt-5.4" } },
   };
 
-  assert.equal(core.appendModels(response, [configuredCollision], routableGrokModels), false);
+  assert.equal(
+    core.appendModels(response, [configuredCollision], routableGrokModels, conflictingModels),
+    false,
+  );
   assert.deepEqual([...routableGrokModels], []);
+  assert.deepEqual([...conflictingModels], ["gpt-5.4"]);
   assert.equal(
     core.routeProvider(request, routableGrokModels, "grok_native"),
     request,
   );
   assert.equal(response.data[0], native);
+});
+
+test("a marked hidden catalog model is revealed and becomes routable", async () => {
+  const core = await loadCore();
+  const hiddenCatalogModel = {
+    id: "grok-4",
+    model: "grok-4",
+    displayName: "grok-4",
+    description: "Hidden app-server metadata",
+    hidden: true,
+    availabilityNux: {
+      message: "codex-administrator:grok-native-catalog-v1",
+    },
+  };
+  const response = { data: [hiddenCatalogModel] };
+  const routableGrokModels = new Set();
+
+  assert.equal(core.appendModels(response, [grokModel], routableGrokModels), true);
+  assert.notEqual(response.data[0], hiddenCatalogModel);
+  assert.equal(response.data[0].model, "grok-4");
+  assert.equal(response.data[0].hidden, false);
+  assert.equal(response.data[0].availabilityNux, null);
+  assert.deepEqual([...routableGrokModels], ["grok-4"]);
 });
 
 test("only Grok thread/start and thread/resume messages receive grok_native", async () => {
@@ -135,11 +163,20 @@ test("only Grok thread/start and thread/resume messages receive grok_native", as
     assert.deepEqual(gptMessage, gptSnapshot, `${shape.name} changed a GPT request`);
 
     const grokMessage = structuredClone(shape.message);
-    shape.read(grokMessage).model = "grok-4";
+    const originalGrokParams = shape.read(grokMessage);
+    originalGrokParams.model = "grok-4";
+    originalGrokParams.config = { preserve_me: true, web_search: "live" };
     const routed = core.routeProvider(grokMessage, grokModels, "grok_native");
     assert.notEqual(routed, grokMessage, shape.name);
     assert.equal(shape.read(routed).modelProvider, "grok_native", shape.name);
+    assert.equal(shape.read(routed).config.preserve_me, true, shape.name);
+    assert.equal(shape.read(routed).config.web_search, "live", shape.name);
     assert.equal("modelProvider" in shape.read(grokMessage), false, `${shape.name} mutated its input`);
+    assert.deepEqual(
+      shape.read(grokMessage).config,
+      { preserve_me: true, web_search: "live" },
+      `${shape.name} mutated its input config`,
+    );
   }
 });
 
@@ -187,6 +224,74 @@ test("Grok thread metadata routes only that thread's model-less resume", async (
 
   assert.equal(routed.request.params.modelProvider, "grok_native");
   assert.equal(core.routeProvider(gptResume, grokModels, "grok_native", grokThreads), gptResume);
+});
+
+test("management-only routing does not resume a remembered Grok thread", async () => {
+  const core = await loadCore();
+  const grokThreads = new Set(["thread-grok"]);
+  const message = {
+    type: "mcp-request",
+    request: {
+      id: 14,
+      method: "thread/resume",
+      params: { threadId: "thread-grok", model: null },
+    },
+  };
+  const snapshot = structuredClone(message);
+
+  assert.equal(
+    core.routeProvider(message, new Set(), "grok_native", grokThreads, new Map()),
+    message,
+  );
+  assert.deepEqual(message, snapshot);
+});
+
+test("an imported Grok thread resumes with a selected Grok model instead of its old provider model", async () => {
+  const core = await loadCore();
+  const grokModels = new Set(["grok-4.5", "grok-4.3-high"]);
+  const grokThreadIds = new Set(["imported-thread"]);
+  const grokThreadModels = new Map();
+  const message = {
+    type: "mcp-request",
+    request: {
+      method: "thread/resume",
+      params: { threadId: "imported-thread", model: "gpt-5.5" },
+    },
+  };
+
+  const routed = core.routeProvider(
+    message,
+    grokModels,
+    "grok_native",
+    grokThreadIds,
+    grokThreadModels,
+  );
+  assert.equal(routed.request.params.modelProvider, "grok_native");
+  assert.equal(routed.request.params.model, "grok-4.5");
+  assert.equal(message.request.params.model, "gpt-5.5");
+
+  core.learnGrokThreads(
+    {
+      result: {
+        data: [{ id: "native-grok-thread", modelProvider: "grok_native", model: "grok-4.3-high" }],
+      },
+    },
+    grokThreadIds,
+    "grok_native",
+    grokThreadModels,
+    grokModels,
+  );
+  const remembered = core.routeProvider(
+    {
+      type: "mcp-request",
+      request: { method: "thread/resume", params: { threadId: "native-grok-thread" } },
+    },
+    grokModels,
+    "grok_native",
+    grokThreadIds,
+    grokThreadModels,
+  );
+  assert.equal(remembered.request.params.model, "grok-4.3-high");
 });
 
 test("thread lists teach the router without treating native GPT threads as Grok", async () => {

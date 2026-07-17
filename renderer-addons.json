@@ -1,0 +1,49 @@
+{
+  "schema_version": 2,
+  "addons": [
+    {
+      "id": "codex-dream-skin",
+      "display_name": "Codex Dream Skin",
+      "project_revision": "568469a4f97e8fa4c8d237ce018c206c29959ecd",
+      "distribution": "external_checkout_only",
+      "load_order": 200,
+      "host_adapters": [
+        "direct"
+      ],
+      "exclusive_slots": [
+        "theme"
+      ],
+      "conflicts_with": [],
+      "entrypoint": {
+        "path": "windows/assets/renderer-inject.js",
+        "sha256": "d17514772b5b35f48d15e7e79bc3957461e10aefa401b20c4d9cfa5392cb656f",
+        "max_bytes": 65536
+      },
+      "substitutions": [
+        {
+          "placeholder": "__DREAM_CSS_JSON__",
+          "encoding": "json_utf8",
+          "asset": {
+            "path": "windows/assets/dream-skin.css",
+            "sha256": "a85bd61d699496928ab19a5d9ea6d1aaaaeedd4bbfb48e37d873854480b53fff",
+            "max_bytes": 262144
+          }
+        },
+        {
+          "placeholder": "__DREAM_ART_JSON__",
+          "encoding": "data_url_base64",
+          "media_type": "image/png",
+          "asset": {
+            "path": "windows/assets/dream-reference.png",
+            "sha256": "e6019a268915194e270d9ad4eb44d99c1a43c22c11463137147d9e00428375fc",
+            "max_bytes": 16777216
+          }
+        }
+      ],
+      "lifecycle": {
+        "state_key": "__CODEX_DREAM_SKIN_STATE__",
+        "dispose_method": "cleanup"
+      }
+    }
+  ]
+}

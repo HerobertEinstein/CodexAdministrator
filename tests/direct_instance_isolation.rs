@@ -76,13 +76,15 @@ fn launch_arguments_and_environment_reference_only_the_isolated_instance() {
             .any(|value| value.to_string_lossy().contains("Roaming\\Codex"))
     );
     assert_eq!(activation.last(), Some(&OsString::from("--new-window")));
-    assert_eq!(
-        environment,
-        vec![(
-            OsString::from("CODEX_HOME"),
-            OsString::from(r"C:\Users\Example\AppData\Local\CodexAdministrator\codex-home"),
-        )]
-    );
+    assert_eq!(environment.len(), 2);
+    assert!(environment.contains(&(
+        OsString::from("CODEX_HOME"),
+        OsString::from(r"C:\Users\Example\AppData\Local\CodexAdministrator\codex-home"),
+    )));
+    assert!(environment.contains(&(
+        OsString::from("CODEX_SQLITE_HOME"),
+        OsString::from(r"C:\Users\Example\AppData\Local\CodexAdministrator\codex-home\sqlite"),
+    )));
 }
 
 #[test]

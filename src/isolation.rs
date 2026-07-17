@@ -130,10 +130,19 @@ impl DirectIsolationContract {
     }
 
     pub fn environment_overrides(&self) -> Vec<(OsString, OsString)> {
-        vec![(
-            OsString::from("CODEX_HOME"),
-            self.isolated_codex_home.as_os_str().to_os_string(),
-        )]
+        vec![
+            (
+                OsString::from("CODEX_HOME"),
+                self.isolated_codex_home.as_os_str().to_os_string(),
+            ),
+            (
+                OsString::from("CODEX_SQLITE_HOME"),
+                self.isolated_codex_home
+                    .join("sqlite")
+                    .as_os_str()
+                    .to_os_string(),
+            ),
+        ]
     }
 
     pub fn verify_runtime(&self, observation: &IsolatedRuntimeObservation) -> Result<()> {

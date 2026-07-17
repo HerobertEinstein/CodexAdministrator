@@ -3,19 +3,37 @@
 Codex Administrator remains external to ChatGPT/Codex and Codex++ installation
 and update mechanisms.
 
-## Project-Owned Writes
+## Project-Owned State And Reads
 
 The project may write only:
 
 - `model_providers.grok_native` in the supported user-owned Codex
   configuration;
-- a project-owned isolated profile and isolated `CODEX_HOME` for a direct
-  instance;
-- its generated Codex++ external script; and
-- its exact Codex++ script enablement key.
+- `%LOCALAPPDATA%\CodexAdministrator\launcher-settings.json`, containing only
+  non-secret provider, model, state-import, and renderer-addon settings;
+- one per-user Generic Credential in Windows Credential Manager for the
+  provider API key;
+- a project-owned isolated profile and isolated `CODEX_HOME`, including its
+  generated model catalog and SQLite location;
+- an atomically validated private copy of daily `auth.json` when native login
+  synchronization is enabled;
+- private copies of `sessions/**/*.jsonl`, `archived_sessions/**/*.jsonl`, and
+  `session_index.jsonl` when task snapshot import is explicitly enabled;
+- its generated Codex++ external script and exact enablement key only after the
+  exact Codex++ host passes compatibility; and
+- project-owned renderer-addon settings. Addon source checkouts are read-only
+  and remain user-owned.
 
 Provider registration never changes the user's native model, default provider,
 model catalog, existing providers, or unknown future settings.
+Existing tool configuration is preserved, including unrelated
+`shell_environment_policy` entries. The only security merge forces default
+exclusions on, adds the provider variable to the exclusion list, and rejects a
+configuration that explicitly reintroduces that secret through
+`shell_environment_policy.set`.
+Provider cleanup retains the shell exclusion because its prior ownership cannot
+be proven; leaving a sensitive variable blocked is safer than deleting a
+possibly user-owned rule.
 
 ## Forbidden Writes
 
@@ -25,7 +43,9 @@ services, update settings, or update channels. An isolated profile or
 `CODEX_HOME` must not equal, contain, or be contained by any daily path. The
 instance path must not traverse a reparse point. The project must not store
 credential values in source, arguments, configuration, logs, reports, tests,
-or compatibility evidence.
+or compatibility evidence. It must not write daily `auth.json`, task snapshots,
+`config.toml`, SQLite/WAL/SHM, logs, goals, memories, or a renderer-addon source
+checkout.
 
 ## Fail-Closed Updates
 
@@ -44,4 +64,4 @@ runtime provider-readiness failure cleans the root instead of claiming success.
 Removal may delete only project-owned entries, files, and isolated instance
 directories after their absolute paths pass the isolation contract. It must
 preserve all native models, user defaults, other provider definitions, daily
-profiles, tasks, credentials, caches, and updater state.
+profiles, tasks, credentials, caches, addon checkouts, and updater state.

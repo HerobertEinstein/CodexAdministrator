@@ -41,16 +41,21 @@ Before a host identity is accepted, a fresh desktop run must prove:
 6. each configured Grok entry appears once;
 7. selecting GPT emits the original request object;
 8. selecting Grok routes only new Grok tasks to `grok_native`;
-9. a known Grok task resumes through the same provider;
+9. when resume compatibility is claimed, a known Grok task resumes through the
+   same provider;
 10. the official app-server `config/read` response contains
     `model_providers.grok_native` before the launcher reports ready;
 11. disposal restores the exact prior writable renderer API function; and
 12. an incompatible update leaves the host native.
 
-The latest Direct E2E on `OpenAI.Codex 26.707.9981.0` proves automatic
-executable discovery, suspended official-package acceptance, listener PID
-ownership, bridge and UI readiness, native provider readiness, daily-instance
-preservation, and zero owned process/profile residue. Scoped CDP tests prove
+The most recent retained Direct E2E, on 2026-07-17 with
+`OpenAI.Codex 26.715.2305.0`, used management-only mode with no selected Grok
+model or provider credential. It proves automatic executable discovery,
+suspended official-package acceptance, listener PID ownership, bridge and UI
+readiness, native-selector manager availability, daily-instance preservation,
+and zero owned process/profile/port residue. Configured-provider readiness on
+that exact package remains unclaimed; it is covered only by separate earlier
+dated evidence. Scoped CDP tests prove
 startup reinjection after a renderer reset. Separate Windows tests prove
 runtime-persistent escaped-descendant lineage tracking, orphan discovery after
 an intermediate parent exits, multi-generation PID tracking, entry-order retry,
@@ -91,25 +96,17 @@ synchronization use a separate handle, and both
 must report the same creation time. Unreadable processes without an exact match
 do not widen ownership; termination-right or identity failure after a match is
 fail-closed. Query-only liveness uses `GetExitCodeProcess`, not exit-time fields.
-Shutdown and Drop include the initial scan in one ten-second
-deadline; root scanning, process wait, and deletion share a separate ten-second
-deadline.
+Shutdown and Drop start a thirty-second descendant cleanup budget after the
+initial global scan; root scanning, process wait, and deletion retain a
+separate 10-second deadline.
 
-A follow-up live run on the same official package used exact model `grok-4.5`.
-The official rollout recorded native text, an `update_plan` function call, its
-`function_call_output`, final text, and two completed tasks. Natural timeout
-then preserved all eight pre-existing daily PIDs and removed the launcher,
-listener, owned processes, and instance root exactly.
-
-The final generation-safe natural-timeout run preserved all eleven daily
-ChatGPT processes present at launch and again left no owned process, listener,
-instance root, or stderr output.
-
-A later official-desktop shell run routed exact `grok-4.5` through
-`grok_native`, recorded one completed PowerShell `commandExecution` with output
-`HEBOX_DESKTOP_SHELL_TOOL_OK` and exit code `0`, and returned final text
-`HEBOX_DESKTOP_SHELL_FINAL_OK`. Natural timeout preserved all eleven daily PIDs
-and left no process, listener, instance root, or stderr residue.
+A configured-provider run on an earlier dated package used exact model
+`grok-4.5`, selected it through the official model menu, and recorded
+`modelProvider = grok_native`. Separate retained runs completed one
+`update_plan` function-call/output loop and one native shell
+`commandExecution` with exit code `0`. Each run preserved the pre-existing daily
+process identities and removed its exact owned listener, process tree, and test
+root.
 
 Message-level tests are necessary but do not satisfy this desktop gate.
 
@@ -133,5 +130,5 @@ unclaimed without changing the host's existing providers. For the exact
 app-server text, one `update_plan` function-call/output loop, and one native
 shell `commandExecution` loop have passed. Files, images, parallel tools,
 structured output, cancellation, resume reliability, and complete parity remain
-unclaimed. The distinct `grok-4.5-cli` alias currently returns HTTP 503 from its
-upstream distributor.
+unclaimed. Transient upstream availability errors are operational evidence, not
+durable compatibility claims.

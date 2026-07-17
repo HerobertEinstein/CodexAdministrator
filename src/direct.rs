@@ -10,7 +10,7 @@ use anyhow::{Result, bail};
 use http::Uri;
 use serde::Serialize;
 
-use crate::{DirectIsolationContract, IsolatedRuntimeObservation};
+use crate::{ControlRequest, ControlResponse, DirectIsolationContract, IsolatedRuntimeObservation};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectInstanceLayout {
@@ -115,6 +115,10 @@ impl DirectCdpTarget {
 }
 
 pub trait DirectRuntimeBackend {
+    fn requires_provider_readiness(&self) -> bool {
+        true
+    }
+
     fn snapshot_chatgpt_pids(&mut self) -> Result<BTreeSet<u32>>;
 
     fn prepare_owned_paths(&mut self, contract: &DirectIsolationContract) -> Result<()>;
@@ -134,6 +138,10 @@ pub trait DirectRuntimeBackend {
 
     fn cdp_listener_pid(&mut self, port: u16) -> Result<u32>;
 
+    fn owned_window_open(&mut self) -> Result<bool> {
+        Ok(true)
+    }
+
     fn install_bootstrap(
         &mut self,
         target: &DirectCdpTarget,
@@ -151,6 +159,22 @@ pub trait DirectRuntimeBackend {
 
     fn injection_healthy(&mut self, target: &DirectCdpTarget) -> Result<bool>;
 
+    fn drain_control_requests(
+        &mut self,
+        _target: &DirectCdpTarget,
+        _nonce: &str,
+    ) -> Result<Vec<ControlRequest>> {
+        Ok(Vec::new())
+    }
+
+    fn deliver_control_response(
+        &mut self,
+        _target: &DirectCdpTarget,
+        _response: ControlResponse,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     fn shutdown(&mut self) -> Result<()>;
 }
 
@@ -159,6 +183,7 @@ pub enum DirectMaintenance {
     Healthy,
     Reinjected,
     Recovering,
+    Exited,
 }
 
 pub struct DirectInstance<B: DirectRuntimeBackend> {
@@ -209,7 +234,9 @@ impl<B: DirectRuntimeBackend> DirectInstance<B> {
             verify_runtime(&contract, &preexisting_pids, &mut backend, &target)?;
             backend.install_bootstrap(&target, &bootstrap, timeout)?;
             backend.wait_for_ui_ready(&target, timeout)?;
-            backend.wait_for_provider_ready(&target, timeout)?;
+            if backend.requires_provider_readiness() {
+                backend.wait_for_provider_ready(&target, timeout)?;
+            }
             Ok((preexisting_pids, target))
         })();
 
@@ -236,6 +263,50 @@ impl<B: DirectRuntimeBackend> DirectInstance<B> {
         &self.target
     }
 
+    pub fn drain_control_requests(&mut self, nonce: &str) -> Result<Vec<ControlRequest>> {
+        let backend = self
+            .backend
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("direct instance is already shut down"))?;
+        match backend.drain_control_requests(&self.target, nonce) {
+            Ok(requests) => Ok(requests),
+            Err(error) => {
+                if owned_instance_exited(backend)? {
+                    self.maintenance_failure_since = None;
+                    return Ok(Vec::new());
+                }
+                tolerate_transient_maintenance_failure(
+                    &mut self.maintenance_failure_since,
+                    self.timeout,
+                    error,
+                )?;
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    pub fn deliver_control_response(&mut self, response: ControlResponse) -> Result<()> {
+        let backend = self
+            .backend
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("direct instance is already shut down"))?;
+        match backend.deliver_control_response(&self.target, response) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                if owned_instance_exited(backend)? {
+                    self.maintenance_failure_since = None;
+                    return Ok(());
+                }
+                tolerate_transient_maintenance_failure(
+                    &mut self.maintenance_failure_since,
+                    self.timeout,
+                    error,
+                )?;
+                Ok(())
+            }
+        }
+    }
+
     pub fn maintain_once(&mut self) -> Result<DirectMaintenance> {
         let result = (|| -> Result<DirectMaintenance> {
             let backend = self
@@ -246,6 +317,10 @@ impl<B: DirectRuntimeBackend> DirectInstance<B> {
             {
                 Ok(target) => target,
                 Err(error) => {
+                    if owned_instance_exited(backend)? {
+                        self.maintenance_failure_since = None;
+                        return Ok(DirectMaintenance::Exited);
+                    }
                     return tolerate_transient_maintenance_failure(
                         &mut self.maintenance_failure_since,
                         self.timeout,
@@ -263,6 +338,10 @@ impl<B: DirectRuntimeBackend> DirectInstance<B> {
                 match backend.injection_healthy(&target) {
                     Ok(healthy) => healthy,
                     Err(error) => {
+                        if owned_instance_exited(backend)? {
+                            self.maintenance_failure_since = None;
+                            return Ok(DirectMaintenance::Exited);
+                        }
                         return tolerate_transient_maintenance_failure(
                             &mut self.maintenance_failure_since,
                             self.timeout,
@@ -275,6 +354,10 @@ impl<B: DirectRuntimeBackend> DirectInstance<B> {
                 if let Err(error) =
                     backend.install_bootstrap(&target, &self.bootstrap, self.timeout)
                 {
+                    if owned_instance_exited(backend)? {
+                        self.maintenance_failure_since = None;
+                        return Ok(DirectMaintenance::Exited);
+                    }
                     return tolerate_transient_maintenance_failure(
                         &mut self.maintenance_failure_since,
                         self.timeout,
@@ -305,6 +388,13 @@ impl<B: DirectRuntimeBackend> DirectInstance<B> {
             None => Ok(()),
         }
     }
+}
+
+fn owned_instance_exited<B: DirectRuntimeBackend>(backend: &mut B) -> Result<bool> {
+    if !backend.owned_window_open()? {
+        return Ok(true);
+    }
+    Ok(backend.owned_pids()?.is_empty())
 }
 
 fn tolerate_transient_maintenance_failure(

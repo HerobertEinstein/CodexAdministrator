@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use codex_administrator::{DirectCdpTarget, LoopbackCdpClient};
+use codex_administrator::{ControlOperation, ControlResponse, DirectCdpTarget, LoopbackCdpClient};
 use serde_json::{Value, json};
 use tungstenite::{Message, accept};
 
@@ -360,6 +360,88 @@ fn provider_readiness_accepts_only_the_loaded_grok_provider() {
 
     LoopbackCdpClient::default()
         .wait_for_provider_ready(&target(port), Duration::from_secs(1))
+        .unwrap();
+
+    server.join().unwrap();
+}
+
+#[test]
+fn control_requests_are_drained_through_the_isolated_renderer_only() {
+    const NONCE: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = accept(stream).unwrap();
+        let command = read_command(&mut socket);
+        let expression = command["params"]["expression"].as_str().unwrap();
+        assert!(expression.contains("__codexAdministratorControlInternal"));
+        assert!(expression.contains(".drain"));
+        assert!(expression.contains(NONCE));
+        socket
+            .send(Message::Text(
+                json!({
+                    "id": command["id"],
+                    "result": {
+                        "result": {
+                            "type": "object",
+                            "value": [{
+                                "version": 1,
+                                "id": "ca-1",
+                                "nonce": NONCE,
+                                "operation": "state.read",
+                                "payload": {}
+                            }]
+                        }
+                    }
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+    });
+
+    let requests = LoopbackCdpClient::default()
+        .drain_control_requests(&target(port), NONCE)
+        .unwrap();
+
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].id(), "ca-1");
+    assert_eq!(requests[0].operation(), ControlOperation::StateRead);
+    server.join().unwrap();
+}
+
+#[test]
+fn control_responses_are_delivered_without_embedding_request_payloads() {
+    const NONCE: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = accept(stream).unwrap();
+        let command = read_command(&mut socket);
+        let expression = command["params"]["expression"].as_str().unwrap();
+        assert!(expression.contains("__codexAdministratorControlInternal"));
+        assert!(expression.contains(".deliver"));
+        assert!(expression.contains("credential_present"));
+        assert!(!expression.contains("transient-only"));
+        socket
+            .send(Message::Text(
+                json!({
+                    "id": command["id"],
+                    "result": {"result": {"type": "boolean", "value": true}}
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+    });
+
+    LoopbackCdpClient::default()
+        .deliver_control_response(
+            &target(port),
+            ControlResponse::success("ca-1", NONCE, json!({"credential_present": true})),
+        )
         .unwrap();
 
     server.join().unwrap();
