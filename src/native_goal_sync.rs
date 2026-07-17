@@ -112,6 +112,21 @@ impl<R: BufRead, W: Write> JsonLineAppServer<R, W> {
     }
 
     fn request(&mut self, method: &str, params: Value) -> Result<Value> {
+        match self.request_outcome(method, params)? {
+            Ok(result) => Ok(result),
+            Err(error) => bail!(
+                "official app-server request {method} failed ({}): {}",
+                error.code,
+                error.message
+            ),
+        }
+    }
+
+    fn request_outcome(
+        &mut self,
+        method: &str,
+        params: Value,
+    ) -> Result<std::result::Result<Value, AppServerRpcError>> {
         let request_id = self.next_request_id.to_string();
         self.next_request_id = self
             .next_request_id
@@ -136,13 +151,18 @@ impl<R: BufRead, W: Write> JsonLineAppServer<R, W> {
                 let description = error
                     .get("message")
                     .and_then(Value::as_str)
-                    .unwrap_or("unknown app-server error");
-                bail!("official app-server request {method} failed ({code}): {description}");
+                    .unwrap_or("unknown app-server error")
+                    .to_owned();
+                return Ok(Err(AppServerRpcError {
+                    code,
+                    message: description,
+                }));
             }
             return message
                 .get("result")
                 .cloned()
-                .ok_or_else(|| anyhow::anyhow!("official app-server response omitted result"));
+                .ok_or_else(|| anyhow::anyhow!("official app-server response omitted result"))
+                .map(Ok);
         }
     }
 
@@ -193,6 +213,18 @@ impl<R: BufRead, W: Write> JsonLineAppServer<R, W> {
     #[cfg(test)]
     fn into_writer(self) -> W {
         self.writer
+    }
+}
+
+#[derive(Debug)]
+struct AppServerRpcError {
+    code: i64,
+    message: String,
+}
+
+impl AppServerRpcError {
+    fn is_thread_not_found(&self, thread_id: &str) -> bool {
+        self.code == -32600 && self.message == format!("thread not found: {thread_id}")
     }
 }
 
@@ -394,6 +426,81 @@ impl SpawnedGoalStore {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+
+    fn available_thread_ids(&mut self) -> Result<BTreeSet<String>> {
+        let ids = self.list_thread_ids(true)?;
+        if ids.is_empty() {
+            self.list_thread_ids(false)
+        } else {
+            Ok(ids)
+        }
+    }
+
+    fn list_thread_ids(&mut self, use_state_db_only: bool) -> Result<BTreeSet<String>> {
+        let mut ids = BTreeSet::new();
+        for archived in [false, true] {
+            let mut cursor = None::<String>;
+            for _ in 0..128 {
+                let result = self.server_mut()?.request(
+                    "thread/list",
+                    json!({
+                        "archived": archived,
+                        "cursor": cursor,
+                        "cwd": null,
+                        "limit": 1000,
+                        "modelProviders": [],
+                        "searchTerm": null,
+                        "sortDirection": "desc",
+                        "sortKey": "recency_at",
+                        "sourceKinds": [],
+                        "useStateDbOnly": use_state_db_only
+                    }),
+                )?;
+                let data = result
+                    .get("data")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| anyhow::anyhow!("official thread/list response omitted data"))?;
+                for thread in data {
+                    let id = thread.get("id").and_then(Value::as_str).ok_or_else(|| {
+                        anyhow::anyhow!("official thread/list response contains no thread id")
+                    })?;
+                    if !valid_thread_id(id) {
+                        bail!("official thread/list returned an invalid thread id");
+                    }
+                    ids.insert(id.to_owned());
+                    if ids.len() > MAX_SHARED_THREADS {
+                        bail!("official thread/list exceeds the shared-thread limit");
+                    }
+                }
+                cursor = result
+                    .get("nextCursor")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                if cursor.is_none() {
+                    break;
+                }
+            }
+            if cursor.is_some() {
+                bail!("official thread/list exceeded its pagination limit");
+            }
+        }
+        Ok(ids)
+    }
+
+    fn goal_thread_available(&mut self, thread_id: &str) -> Result<bool> {
+        match self
+            .server_mut()?
+            .request_outcome("thread/goal/get", json!({"threadId": thread_id}))?
+        {
+            Ok(_) => Ok(true),
+            Err(error) if error.is_thread_not_found(thread_id) => Ok(false),
+            Err(error) => bail!(
+                "official app-server request thread/goal/get failed ({}): {}",
+                error.code,
+                error.message
+            ),
+        }
+    }
 }
 
 impl Drop for SpawnedGoalStore {
@@ -413,6 +520,7 @@ where
     T: IntoIterator,
     T::Item: AsRef<str>,
 {
+    let requested = validated_thread_ids(thread_ids)?;
     let daily = canonical_existing_path(daily_codex_home)?;
     let isolated = canonical_existing_path(isolated_codex_home)?;
     if daily == isolated {
@@ -420,12 +528,28 @@ where
     }
     let mut daily_store = command.spawn(&daily)?;
     let mut isolated_store = command.spawn(&isolated)?;
-    sync_native_goal_intents(
+    let daily_threads = daily_store.available_thread_ids()?;
+    let isolated_threads = isolated_store.available_thread_ids()?;
+    let mut shared = Vec::new();
+    for thread_id in &requested {
+        if !daily_threads.contains(thread_id) || !isolated_threads.contains(thread_id) {
+            continue;
+        }
+        if daily_store.goal_thread_available(thread_id)?
+            && isolated_store.goal_thread_available(thread_id)?
+        {
+            shared.push(thread_id);
+        }
+    }
+    let mut receipt = sync_native_goal_intents(
         &mut daily_store,
         &mut isolated_store,
-        thread_ids,
+        shared.iter().map(|thread_id| thread_id.as_str()),
         manifest_path,
-    )
+    )?;
+    receipt.threads = requested.len();
+    receipt.skipped_missing = requested.len().saturating_sub(shared.len());
+    Ok(receipt)
 }
 
 pub fn sync_native_goal_intents_via_official_app_server<T>(
@@ -524,6 +648,7 @@ fn canonical_existing_path(path: &Path) -> Result<PathBuf> {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NativeGoalSyncReceipt {
     pub threads: usize,
+    pub skipped_missing: usize,
     pub unchanged: usize,
     pub copied_to_daily: usize,
     pub copied_to_isolated: usize,
@@ -995,12 +1120,34 @@ mod tests {
         fs::create_dir_all(&daily).unwrap();
         fs::create_dir_all(&isolated).unwrap();
         let thread_id = "019f2164-bb7b-76a1-bed5-8f7ff7f6a26e";
+        let missing_thread_id = "019f2164-bb7b-76a1-bed5-8f7ff7f6a26f";
         let initial = goal_fixture("Daily objective");
         fs::write(
             daily.join("fake-goals.json"),
-            serde_json::to_vec(&json!({thread_id: initial})).unwrap(),
+            serde_json::to_vec(&json!({
+                thread_id: initial,
+                missing_thread_id: goal_fixture("Daily-only task")
+            }))
+            .unwrap(),
         )
         .unwrap();
+        fs::write(
+            daily.join("fake-threads.json"),
+            serde_json::to_vec(&json!([thread_id, missing_thread_id])).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            isolated.join("fake-threads.json"),
+            serde_json::to_vec(&json!([thread_id, missing_thread_id])).unwrap(),
+        )
+        .unwrap();
+        for home in [&daily, &isolated] {
+            fs::write(
+                home.join("fake-goal-capable.json"),
+                serde_json::to_vec(&json!([thread_id])).unwrap(),
+            )
+            .unwrap();
+        }
         let script = temp.path().join("fake-app-server.mjs");
         fs::write(&script, FAKE_APP_SERVER).unwrap();
         let command = AppServerCommand {
@@ -1013,12 +1160,13 @@ mod tests {
             &command,
             &daily,
             &isolated,
-            [thread_id],
+            [thread_id, missing_thread_id],
             &manifest,
         )
         .unwrap();
 
         assert_eq!(first.copied_to_isolated, 1);
+        assert_eq!(first.skipped_missing, 1);
         let isolated_goals: Value =
             serde_json::from_slice(&fs::read(isolated.join("fake-goals.json")).unwrap()).unwrap();
         assert_eq!(isolated_goals[thread_id]["objective"], "Daily objective");
@@ -1102,6 +1250,8 @@ import { join } from "node:path";
 
 const home = process.env.CODEX_HOME;
 const statePath = join(home, "fake-goals.json");
+const threadsPath = join(home, "fake-threads.json");
+const goalCapablePath = join(home, "fake-goal-capable.json");
 const load = () => {
   try { return JSON.parse(readFileSync(statePath, "utf8")); }
   catch { return {}; }
@@ -1122,7 +1272,23 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line)
     return;
   }
   const state = load();
+  if (request.method === "thread/list") {
+    let threads = [];
+    try { threads = JSON.parse(readFileSync(threadsPath, "utf8")); } catch {}
+    send({ id: request.id, result: {
+      data: threads.map((id) => ({ id })),
+      nextCursor: null,
+      backwardsCursor: null
+    }});
+    return;
+  }
   const threadId = request.params.threadId;
+  let goalCapable = [];
+  try { goalCapable = JSON.parse(readFileSync(goalCapablePath, "utf8")); } catch {}
+  if (!goalCapable.includes(threadId)) {
+    send({ id: request.id, error: { code: -32600, message: `thread not found: ${threadId}` }});
+    return;
+  }
   if (request.method === "thread/goal/get") {
     const goal = state[threadId] ?? null;
     send({ id: request.id, result: { goal: goal && {
