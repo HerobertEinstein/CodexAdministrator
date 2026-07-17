@@ -24,6 +24,7 @@ verified_by:
   - node --test tests/renderer_api_discovery.test.mjs tests/bootstrap_runtime.test.mjs
   - node --test tests/provider_readiness.test.mjs
   - 2026-07-17 production Direct launcher E2E on OpenAI.Codex 26.707.12708.0
+  - 2026-07-17 configured-provider Direct E2E on OpenAI.Codex 26.715.2305.0
 ---
 # Isolated Official Desktop Instance
 
@@ -60,11 +61,12 @@ The official package probe used a temporary profile and fresh CDP port, created
 a disjoint isolated ChatGPT process tree, routed a Grok `thread/start` probe
 through `grok_native`, left the native bridge reference unchanged, restored the
 exact prior renderer function, and removed every temporary process and profile
-directory. A 2026-07-17 update-compatibility run on
-`OpenAI.Codex 26.707.12708.0`
-passed automatic executable discovery, bridge and native UI readiness, official
-app-server `grok_native` readiness, daily-instance preservation, clean launcher
-exit, and zero owned process or instance-root residue.
+directory. A 2026-07-17 configured-provider compatibility run on
+`OpenAI.Codex 26.715.2305.0` passed automatic executable discovery, bridge and
+native UI readiness, an eight-model reviewed refresh, official-menu
+`grok-4.5` selection, one exact native text response through `grok_native`,
+daily-instance preservation, clean launcher exit, and zero owned process or
+instance-root residue.
 
 The production launcher now creates root processes suspended, verifies the
 actual image and official package family, assigns them to a Windows Job Object
@@ -122,25 +124,27 @@ termination wait, and deletion share one separate 10-second owned-root removal d
 still covers isolated-root `git fetch` / `index-pack` helpers without
 generalizing to unrelated Git processes.
 
-Retained exact-model E2E evidence for `grok-4.5` covers native text, one
-`update_plan` function-call/output loop, and one PowerShell
-`commandExecution` with exit code `0`. Each dated run preserved the daily
-process identities and left no launcher, listener, owned process, instance-root,
-or stderr residue. Raw run markers and transient process counts stay in local
-verification evidence rather than this active public decision.
+Retained exact-model E2E on `OpenAI.Codex 26.715.2305.0` covers one native
+`grok-4.5` text turn. Earlier dated packages separately cover one `update_plan`
+function-call/output loop and one PowerShell `commandExecution` with exit code
+`0`. Each dated run preserved the daily process identities and left no launcher,
+listener, owned process, instance-root, or stderr residue. Raw run markers and
+transient process counts stay in local verification evidence rather than this
+active public decision.
 
-A later retained-profile run produced equal SHA-256 hashes and sizes for the
-daily and isolated `auth.json`, showed the native composer without a sign-in
-prompt, kept the provider-specific credential separate from official login
-state, and recorded a new high-effort Grok turn as
+A retained-profile run on an earlier dated official package produced equal
+SHA-256 hashes and sizes for the daily and isolated `auth.json`, showed the
+native composer without a sign-in prompt, kept the provider-specific credential
+separate from official login state, and recorded a new high-effort Grok turn as
 `modelProvider = grok_native` after an identical bootstrap reapplication.
 
-The dated 2026-07-17 configured-provider run used official package
-`OpenAI.Codex 26.707.12708.0`, native-login sync, and one exact isolated test
-root. It preserved the pre-existing daily process identities, produced a clean
-launcher exit, closed the owned endpoint across a stable failure window, and
-removed its exact test root. Credential scans found no provider-key value in
-source or retained evidence.
+The latest dated 2026-07-17 configured-provider run used official package
+`OpenAI.Codex 26.715.2305.0`, native-login sync, `grok-4.5`, and one exact
+isolated test root. It preserved all nine pre-existing daily process identities,
+produced clean launcher and driver results, closed its dynamically allocated
+endpoint, removed every recorded runtime identity and its exact test root,
+left the CCSwitch `HE BOX more` provider row unchanged through read-only
+connections, and found no provider-key value in retained source or evidence.
 
 ## Use Next Time
 
@@ -150,10 +154,11 @@ CDP target monitor, UI and native provider readiness gates, bounded reinjection
 lifecycle, descendant-lineage cleanup, and exact owned-root removal. Never fall
 back to attaching or activating the daily instance. Do not confuse
 implementation or E2E evidence with a release, merge, deployment, or endpoint
-capability-parity claim. `grok-4.5` has exact live evidence for Responses text
-plus one native `update_plan` loop and one native shell `commandExecution` loop.
-Files, images, parallel tools, structured output, cancellation, resume
-reliability, and complete parity remain unproven. Keep complete session import
-off by default and consult `native-state-import-boundary.md` before widening its
+capability-parity claim. `grok-4.5` on `OpenAI.Codex 26.715.2305.0` has exact
+live evidence for Responses and native text. Earlier dated packages separately
+prove one native `update_plan` loop and one native shell `commandExecution`
+loop. Files, images, parallel tools, structured output, cancellation, resume
+reliability, and complete parity remain unproven on every package. Keep complete
+session import off by default and consult `native-state-import-boundary.md` before widening its
 daily read allowlist or making any resume claim. Transient upstream availability
 belongs in local operational evidence, not this active architecture decision.

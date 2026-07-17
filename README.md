@@ -54,16 +54,18 @@ official package or daily ChatGPT instance.
   validates the official package before resume and never falls back to the
   daily instance.
 - The most recent retained compatibility run on 2026-07-17 used
-  `OpenAI.Codex 26.715.2305.0` in management-only mode with no selected Grok
-  model or provider credential. It proved startup on that official package,
-  the native model-selector manager, daily-instance preservation, and exact
-  owned-root and loopback-port cleanup. Configured-provider execution on that
-  exact package is not claimed by this run.
-- Exact `grok-4.5` evidence covers Responses text streaming, native text, one
-  `update_plan` function-call/output loop, one native shell
+  `OpenAI.Codex 26.715.2305.0` in configured Direct mode with `grok-4.5`. It
+  refreshed the reviewed eight-model catalog, selected Grok through the
+  official model menu, completed one exact native text response through
+  `grok_native`, preserved all nine daily process identities, and removed its
+  dynamic listener, process identities, and exact owned root. A separate run
+  on the same package also retains management-only proof with no provider key.
+- On `OpenAI.Codex 26.715.2305.0`, exact `grok-4.5` evidence covers Responses
+  text streaming and one native text turn. Earlier dated packages separately
+  prove one `update_plan` function-call/output loop, one native shell
   `commandExecution` loop, and high reasoning selection. Files, images,
   parallel tools, structured output, cancellation, automated restart/resume,
-  and complete native parity remain unclaimed.
+  and complete native parity remain unclaimed on every package.
 - Native file-backed authentication can be copied one-way into the retained
   isolated profile. Full task snapshot import is a separate opt-in and remains
   a visibility/routing feature rather than a resume-parity claim.

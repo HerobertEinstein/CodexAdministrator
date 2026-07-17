@@ -80,9 +80,10 @@ exact shell/tool evidence remains model-specific.
 - Production Direct desktop E2E now proves native-list preservation, one Grok
   entry, native-menu Grok selection, GPT-5.4 restoration, renderer-reload
   reinjection, and exact cleanup. Endpoint capability parity remains unproven.
-- A retained-profile E2E caught and fixed an identical-reconfiguration reset:
-  after reapplication, a new turn stored `modelProvider = grok_native`,
-  `model = grok-4.5`, and `effort = high` instead of falling back to `openai`.
+- A retained-profile E2E on an earlier dated official package caught and fixed
+  an identical-reconfiguration reset: after reapplication, a new turn stored
+  `modelProvider = grok_native`, `model = grok-4.5`, and `effort = high`
+  instead of falling back to `openai`.
 - The dated 2026-07-17 r26 run, before the exact reviewed-registry filter was added,
   observed 12 upstream Grok IDs and proved a real native Advanced -> Model
   interaction, native keyboard selection of `grok-4.5`, one exact nonce

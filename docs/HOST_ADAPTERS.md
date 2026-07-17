@@ -11,10 +11,13 @@ The direct adapter is reserved for a project-owned isolated instance of the
 official desktop application. It may not reuse or activate the daily instance.
 
 The most recent retained live run, on 2026-07-17 with official package
-`OpenAI.Codex 26.715.2305.0`, used management-only mode with no selected Grok
-model or provider credential. It reconfirmed that a separate profile and
-loopback CDP port create a separate process tree, preserves every daily PID,
-and leaves no owned root, process reference, or listener after shutdown.
+`OpenAI.Codex 26.715.2305.0`, used configured Direct mode with `grok-4.5`. It
+refreshed the reviewed eight-model catalog, selected Grok in the official menu,
+completed one exact native text response, reconfirmed that a separate profile
+and dynamic loopback CDP port create a separate process tree, preserved every
+daily PID identity, and left no owned root, process reference, or listener
+after shutdown. A separate run on the same package retains management-only
+coverage without a provider credential.
 Starting the same isolated profile a second time with `--new-window` creates an
 `app://-/index.html` target on that isolated port. The official
 `window.electronBridge` is frozen, sealed, and non-writable; the reviewed hook

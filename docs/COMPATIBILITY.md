@@ -49,13 +49,13 @@ Before a host identity is accepted, a fresh desktop run must prove:
 12. an incompatible update leaves the host native.
 
 The most recent retained Direct E2E, on 2026-07-17 with
-`OpenAI.Codex 26.715.2305.0`, used management-only mode with no selected Grok
-model or provider credential. It proves automatic executable discovery,
-suspended official-package acceptance, listener PID ownership, bridge and UI
-readiness, native-selector manager availability, daily-instance preservation,
-and zero owned process/profile/port residue. Configured-provider readiness on
-that exact package remains unclaimed; it is covered only by separate earlier
-dated evidence. Scoped CDP tests prove
+`OpenAI.Codex 26.715.2305.0`, used configured mode with exact model
+`grok-4.5`. It proves automatic executable discovery, suspended
+official-package acceptance, listener PID ownership, bridge and UI readiness,
+an eight-model reviewed refresh, native-menu Grok selection, one exact native
+text response through `grok_native`, daily-instance preservation, and zero
+owned process/profile/port residue. A separate run on the same package retains
+management-only proof with no selected model or provider credential. Scoped CDP tests prove
 startup reinjection after a renderer reset. Separate Windows tests prove
 runtime-persistent escaped-descendant lineage tracking, orphan discovery after
 an intermediate parent exits, multi-generation PID tracking, entry-order retry,
@@ -100,13 +100,13 @@ Shutdown and Drop start a thirty-second descendant cleanup budget after the
 initial global scan; root scanning, process wait, and deletion retain a
 separate 10-second deadline.
 
-A configured-provider run on an earlier dated package used exact model
-`grok-4.5`, selected it through the official model menu, and recorded
-`modelProvider = grok_native`. Separate retained runs completed one
-`update_plan` function-call/output loop and one native shell
-`commandExecution` with exit code `0`. Each run preserved the pre-existing daily
-process identities and removed its exact owned listener, process tree, and test
-root.
+A configured-provider run on the current package used exact model `grok-4.5`,
+selected it through the official model menu, returned one exact text response,
+and recorded `modelProvider = grok_native`. Separate retained runs on an
+earlier dated package completed one `update_plan` function-call/output loop and
+one native shell `commandExecution` with exit code `0`. Each run preserved the
+pre-existing daily process identities and removed its exact owned listener,
+process tree, and test root.
 
 Message-level tests are necessary but do not satisfy this desktop gate.
 
@@ -125,10 +125,11 @@ Model-list success is not feature parity. Each exact model and endpoint needs
 separate evidence for text streaming, tools, parallel tools, files, images,
 structured output, reasoning controls, cancellation, resume reliability, and
 any additional native feature. Unsupported or unknown behavior remains
-unclaimed without changing the host's existing providers. For the exact
-`grok-4.5` model and configured endpoint, public Responses streaming, native
-app-server text, one `update_plan` function-call/output loop, and one native
-shell `commandExecution` loop have passed. Files, images, parallel tools,
-structured output, cancellation, resume reliability, and complete parity remain
-unclaimed. Transient upstream availability errors are operational evidence, not
+unclaimed without changing the host's existing providers. For exact
+`grok-4.5` on `OpenAI.Codex 26.715.2305.0`, public Responses streaming and one
+native app-server text turn have passed. Earlier dated packages separately
+prove one `update_plan` function-call/output loop and one native shell
+`commandExecution` loop. Files, images, parallel tools, structured output,
+cancellation, resume reliability, and complete parity remain unclaimed on every
+package. Transient upstream availability errors are operational evidence, not
 durable compatibility claims.

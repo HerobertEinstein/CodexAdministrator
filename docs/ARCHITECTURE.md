@@ -319,15 +319,14 @@ execution host.
 Seeing and selecting a model proves only model-list and routing behavior.
 Streaming, tools, files, images, structured output, reasoning controls,
 cancellation, and reliable resume are independent evidence gates. The project
-must not advertise any of them from model visibility alone. Exact-model live
-evidence for `grok-4.5` proves a valid public Responses stream, a native
-app-server thread and text turn, and one `update_plan` function-call/output
-round trip. A later isolated official-desktop run also proves one native shell
-`commandExecution` with observed output and exit code `0`. It does not prove
-files, images, parallel tools, structured output, cancellation, reliable
-resume, or complete parity. A retained-profile run also proves that an
-identical bootstrap reapplication preserves `grok_native` routing and that a
-native turn stores `effort = high`. Parallel-tool behavior remains outside the
+must not advertise any of them from model visibility alone. On
+`OpenAI.Codex 26.715.2305.0`, exact-model live evidence for `grok-4.5` proves a
+valid public Responses stream plus a native app-server thread and text turn.
+Earlier dated packages separately prove one `update_plan` function-call/output
+round trip, one native shell `commandExecution` with observed output and exit
+code `0`, and one retained high-effort turn. These results do not prove files,
+images, parallel tools, structured output, cancellation, reliable resume, or
+complete parity on any package. Parallel-tool behavior remains outside the
 durable compatibility claim until an exact-model client and endpoint gate
 passes; transient upstream status codes remain operational evidence only.
 
