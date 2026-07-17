@@ -72,6 +72,9 @@ pub fn build_direct_launcher_arguments(
     if settings.sync_native_sessions {
         arguments.push(OsString::from("--sync-native-sessions"));
     }
+    if settings.sync_native_goals {
+        arguments.push(OsString::from("--sync-native-goals"));
+    }
     if settings.sync_native_skills {
         arguments.push(OsString::from("--sync-native-skills"));
     }

@@ -23,6 +23,9 @@ The project may write only:
   `skill-projection-manifest.json` ownership record;
 - private copies of `sessions/**/*.jsonl`, `archived_sessions/**/*.jsonl`, and
   `session_index.jsonl` when task snapshot import is explicitly enabled;
+- an isolated `goal-intent-sync-manifest.json` and official
+  `thread/goal/get|set|clear` calls when optional two-way Goal intent
+  synchronization is explicitly enabled; and
 - its generated Codex++ external script and exact enablement key only after the
   exact Codex++ host passes compatibility; and
 - project-owned renderer-addon settings. Addon source checkouts are read-only
@@ -48,9 +51,12 @@ services, update settings, or update channels. An isolated profile or
 instance path must not traverse a reparse point. The project must not store
 credential values in source, arguments, configuration, logs, reports, tests,
 or compatibility evidence. It must not write daily `auth.json`, custom Skills,
-task snapshots, `config.toml`, SQLite/WAL/SHM, logs, goals, memories, or a
-renderer-addon source checkout. Modified isolated Skill projections are never
-written back to the daily source.
+task snapshots, `config.toml`, SQLite/WAL/SHM, logs, Goal database files,
+memories, or a renderer-addon source checkout. When the user enables Goal
+intent synchronization, the only permitted daily Goal mutation is
+objective/status/token-budget state through the official app-server RPC;
+usage counters remain instance-local. Modified isolated Skill projections are
+never written back to the daily source.
 
 ## Fail-Closed Updates
 

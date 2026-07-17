@@ -36,6 +36,11 @@ Every daily auth/session source is opened with
 link or a post-enumeration link replacement is never followed outside the daily
 root.
 
+Optional Goal intent synchronization is a separate official app-server RPC
+flow. It may update objective/status/token-budget state in either home only
+after explicit opt-in; it never widens this file-import allowlist or copies Goal
+database files and counters.
+
 ## Import Contract
 
 Rollouts use non-blocking shared reads so the daily instance is not held for a

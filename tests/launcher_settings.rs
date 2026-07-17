@@ -88,6 +88,13 @@ fn launcher_settings_reject_invalid_urls_and_unknown_selected_models() {
     settings.cached_models.clear();
     settings.selected_models.clear();
     assert!(settings.validate().is_err());
+
+    let goals_without_sessions = LauncherSettings {
+        sync_native_sessions: false,
+        sync_native_goals: true,
+        ..LauncherSettings::default()
+    };
+    assert!(goals_without_sessions.validate().is_err());
 }
 
 #[test]
@@ -103,6 +110,7 @@ fn missing_launcher_settings_use_safe_defaults() {
     assert!(settings.renderer_addons.is_empty());
     assert!(settings.sync_native_auth);
     assert!(settings.sync_native_sessions);
+    assert!(!settings.sync_native_goals);
     assert!(settings.sync_native_skills);
 }
 

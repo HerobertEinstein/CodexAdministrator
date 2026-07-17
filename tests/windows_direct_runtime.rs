@@ -390,6 +390,7 @@ fn retained_windows_runtime_imports_stable_daily_sessions_into_its_private_home(
             false,
             true,
             false,
+            false,
         )
         .unwrap();
     runtime.prepare_owned_paths(layout.contract()).unwrap();
@@ -447,6 +448,7 @@ fn retained_windows_runtime_projects_daily_custom_skills_on_launch() {
             root.clone(),
             None,
             Vec::new(),
+            false,
             false,
             false,
             true,

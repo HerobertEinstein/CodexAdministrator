@@ -101,6 +101,9 @@ struct InjectArgs {
     sync_native_sessions: bool,
 
     #[arg(long, hide = true)]
+    sync_native_goals: bool,
+
+    #[arg(long, hide = true)]
     sync_native_skills: bool,
 
     #[arg(long, hide = true)]
@@ -194,6 +197,7 @@ fn inject(args: InjectArgs) -> Result<()> {
         action_path_auto: !args.manual_action_path,
         sync_native_auth: args.sync_native_auth,
         sync_native_sessions: args.sync_native_sessions,
+        sync_native_goals: args.sync_native_goals,
         sync_native_skills: args.sync_native_skills,
         credential_present: args.credential_present
             || env::var_os(&args.env_key).is_some_and(|value| !value.is_empty()),
@@ -320,7 +324,10 @@ fn inject_direct(
         return Ok(());
     }
 
-    if (args.sync_native_auth || args.sync_native_sessions || args.sync_native_skills)
+    if (args.sync_native_auth
+        || args.sync_native_sessions
+        || args.sync_native_goals
+        || args.sync_native_skills)
         && !args.retain_instance_root
     {
         bail!("native state synchronization requires --retain-instance-root");
@@ -340,6 +347,7 @@ fn inject_direct(
         renderer_addons,
         sync_native_auth: args.sync_native_auth,
         sync_native_sessions: args.sync_native_sessions,
+        sync_native_goals: args.sync_native_goals,
         sync_native_skills: args.sync_native_skills,
         ..LauncherSettings::default()
     };
@@ -356,13 +364,18 @@ fn inject_direct(
         settings_path,
     )?;
     let injected_models = bootstrap_config.models;
-    let runtime = if args.sync_native_auth || args.sync_native_sessions || args.sync_native_skills {
+    let runtime = if args.sync_native_auth
+        || args.sync_native_sessions
+        || args.sync_native_goals
+        || args.sync_native_skills
+    {
         WindowsDirectRuntime::new_retained_with_native_state_sync_and_injected_models(
             root.clone(),
             provider,
             injected_models,
             args.sync_native_auth,
             args.sync_native_sessions,
+            args.sync_native_goals,
             args.sync_native_skills,
         )?
     } else if args.retain_instance_root {

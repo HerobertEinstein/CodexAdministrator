@@ -28,6 +28,7 @@ pub struct LauncherSettings {
     pub renderer_addons: Vec<RendererAddonSettings>,
     pub sync_native_auth: bool,
     pub sync_native_sessions: bool,
+    pub sync_native_goals: bool,
     pub sync_native_skills: bool,
 }
 
@@ -43,6 +44,7 @@ impl Default for LauncherSettings {
             renderer_addons: Vec::new(),
             sync_native_auth: true,
             sync_native_sessions: true,
+            sync_native_goals: false,
             sync_native_skills: true,
         }
     }
@@ -52,6 +54,9 @@ impl LauncherSettings {
     pub fn validate(&self) -> Result<()> {
         if self.version != SETTINGS_VERSION {
             bail!("launcher settings version is unsupported");
+        }
+        if self.sync_native_goals && !self.sync_native_sessions {
+            bail!("native Goal synchronization requires native task synchronization");
         }
         if self.cached_models.len() > MAX_CACHED_MODELS
             || self.selected_models.len() > MAX_SELECTED_MODELS

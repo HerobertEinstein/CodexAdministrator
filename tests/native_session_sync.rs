@@ -54,6 +54,7 @@ fn stable_daily_rollouts_are_atomically_imported_without_copying_sqlite() {
     assert_eq!(receipt.imported, 1);
     assert_eq!(receipt.updated, 0);
     assert_eq!(receipt.conflicts, 0);
+    assert_eq!(receipt.shared_thread_ids, vec![THREAD_ID]);
 
     let destination = isolated.join(&relative);
     let lines = fs::read_to_string(&destination)

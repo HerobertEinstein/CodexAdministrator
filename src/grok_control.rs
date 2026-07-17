@@ -33,6 +33,8 @@ struct ApplyPayload {
     sync_native_auth: bool,
     sync_native_sessions: bool,
     #[serde(default)]
+    sync_native_goals: Option<bool>,
+    #[serde(default)]
     sync_native_skills: Option<bool>,
 }
 
@@ -229,6 +231,9 @@ impl GrokControlBroker {
         }
         candidate.sync_native_auth = payload.sync_native_auth;
         candidate.sync_native_sessions = payload.sync_native_sessions;
+        if let Some(sync_native_goals) = payload.sync_native_goals {
+            candidate.sync_native_goals = sync_native_goals;
+        }
         if let Some(sync_native_skills) = payload.sync_native_skills {
             candidate.sync_native_skills = sync_native_skills;
         }
@@ -304,6 +309,7 @@ impl GrokControlBroker {
                 "rendererAddons": self.settings.renderer_addons,
                 "syncNativeAuth": self.settings.sync_native_auth,
                 "syncNativeSessions": self.settings.sync_native_sessions,
+                "syncNativeGoals": self.settings.sync_native_goals,
                 "syncNativeSkills": self.settings.sync_native_skills,
             },
             "models": self.settings.cached_models,

@@ -44,6 +44,7 @@ pub struct NativeSessionSyncReceipt {
     pub conflicts: usize,
     pub session_index_entries: usize,
     pub session_index_skipped: bool,
+    pub shared_thread_ids: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -320,7 +321,10 @@ pub fn sync_native_session_snapshots(
     }
 
     match sync_native_session_index(daily_codex_home, isolated_codex_home) {
-        Ok(Some(entries)) => receipt.session_index_entries = entries,
+        Ok(Some(thread_ids)) => {
+            receipt.session_index_entries = thread_ids.len();
+            receipt.shared_thread_ids = thread_ids;
+        }
         Ok(None) => {}
         Err(_) => receipt.session_index_skipped = true,
     }
@@ -332,7 +336,7 @@ pub fn sync_native_session_snapshots(
 fn sync_native_session_index(
     daily_codex_home: &Path,
     isolated_codex_home: &Path,
-) -> Result<Option<usize>> {
+) -> Result<Option<Vec<String>>> {
     let source_path = daily_codex_home.join("session_index.jsonl");
     let Some(source_entries) = read_session_index(&source_path)? else {
         return Ok(None);
@@ -352,6 +356,7 @@ fn sync_native_session_index(
             merged.insert(id, private_entry);
         }
     }
+    let thread_ids = merged.keys().cloned().collect::<Vec<_>>();
 
     let mut rendered = Vec::new();
     for entry in merged.into_values() {
@@ -368,7 +373,7 @@ fn sync_native_session_index(
         }
         Err(error) => return Err(error.into()),
     }
-    Ok(Some(rendered.iter().filter(|byte| **byte == b'\n').count()))
+    Ok(Some(thread_ids))
 }
 
 fn read_session_index(path: &Path) -> Result<Option<Vec<serde_json::Value>>> {

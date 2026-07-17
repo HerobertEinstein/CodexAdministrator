@@ -48,5 +48,7 @@ and all nine daily ChatGPT process identities.
 Keep Skill sharing one-way and manifest-owned. Do not copy `.system`, blindly
 mirror directories, adopt an unmanaged destination, or write isolated edits
 back to the daily source. Preferences, project/global memory, evolution, and
-Goal continuity still need a separate canonical mediated-write layer rather
-than file or SQLite mirroring.
+Goal continuity use separate canonical or mediated-write layers rather than
+file or SQLite mirroring. Optional Goal intent continuity now follows
+`goal-intent-sync-boundary.md`; preferences and project/global memory remain
+user-owned canonical files referenced by their Skills.

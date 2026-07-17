@@ -161,6 +161,7 @@
       selectedModels,
       syncNativeAuth: modelPicker?.syncNativeAuth !== false,
       syncNativeSessions: modelPicker?.syncNativeSessions === true,
+      syncNativeGoals: modelPicker?.syncNativeGoals === true,
       syncNativeSkills: modelPicker?.syncNativeSkills !== false,
     };
   }
@@ -404,10 +405,16 @@
     }
     const syncAuth = toggle("Sync native login", state.syncNativeAuth);
     const syncSessions = toggle("Automatically sync native tasks on launch", state.syncNativeSessions);
+    const syncGoals = toggle("Synchronize shared task Goal intent through official RPC", state.syncNativeGoals);
     const syncSkills = toggle("Automatically sync custom Skills on launch", state.syncNativeSkills);
+    syncGoals.input.disabled = !syncSessions.input.checked;
+    syncSessions.input.addEventListener("change", () => {
+      syncGoals.input.disabled = !syncSessions.input.checked;
+      if (!syncSessions.input.checked) syncGoals.input.checked = false;
+    });
     const syncGroup = documentRef.createElement("div");
     setStyles(syncGroup, { display: "flex", flexDirection: "column", gap: "9px" });
-    syncGroup.append(syncAuth.label, syncSessions.label, syncSkills.label);
+    syncGroup.append(syncAuth.label, syncSessions.label, syncGoals.label, syncSkills.label);
 
     const addonHeading = createTextElement(documentRef, "h3", "Compatible injectors");
     setStyles(addonHeading, { fontSize: "14px", fontWeight: "600", margin: "2px 0 0" });
@@ -537,6 +544,7 @@
           selected_models: selectedModels,
           sync_native_auth: syncAuth.input.checked,
           sync_native_sessions: syncSessions.input.checked,
+          sync_native_goals: syncGoals.input.checked,
           sync_native_skills: syncSkills.input.checked,
         });
         status.textContent = result?.restart_required === false

@@ -83,7 +83,8 @@ use crate::{
     DirectCdpTarget, DirectIsolationContract, DirectRuntimeBackend, GROK_NATIVE_PROVIDER_ID,
     GrokNativeProviderConfig, InjectedModelDescriptor, environment_variable_is_sensitive,
     install_grok_native_model_catalog, install_grok_native_provider, install_isolated_sqlite_home,
-    remove_grok_native_model_catalog, remove_grok_native_provider, sync_native_session_snapshots,
+    remove_grok_native_model_catalog, remove_grok_native_provider,
+    sync_native_goal_intents_via_official_app_server, sync_native_session_snapshots,
     sync_native_skills,
 };
 
@@ -94,12 +95,18 @@ pub struct WindowsDirectRuntime {
     job: Option<OwnedJob>,
     owns_root: bool,
     retain_root: bool,
-    sync_native_auth: bool,
-    sync_native_sessions: bool,
-    sync_native_skills: bool,
+    native_sync: NativeSyncOptions,
     blocked_environment_keys: BTreeSet<String>,
     root_lock: Option<fs::File>,
     cdp: crate::LoopbackCdpClient,
+}
+
+#[derive(Clone, Copy, Default)]
+struct NativeSyncOptions {
+    auth: bool,
+    sessions: bool,
+    goals: bool,
+    skills: bool,
 }
 
 pub fn validate_official_chatgpt_executable(path: &Path) -> Result<()> {
@@ -255,7 +262,13 @@ fn official_package_version(path: &Path) -> Option<[u64; 4]> {
 
 impl WindowsDirectRuntime {
     pub fn new(root: PathBuf, provider: Option<GrokNativeProviderConfig>) -> Result<Self> {
-        Self::new_with_root_options(root, provider, Vec::new(), false, false, false, false)
+        Self::new_with_root_options(
+            root,
+            provider,
+            Vec::new(),
+            false,
+            NativeSyncOptions::default(),
+        )
     }
 
     pub fn new_with_injected_models(
@@ -263,11 +276,23 @@ impl WindowsDirectRuntime {
         provider: Option<GrokNativeProviderConfig>,
         injected_models: Vec<InjectedModelDescriptor>,
     ) -> Result<Self> {
-        Self::new_with_root_options(root, provider, injected_models, false, false, false, false)
+        Self::new_with_root_options(
+            root,
+            provider,
+            injected_models,
+            false,
+            NativeSyncOptions::default(),
+        )
     }
 
     pub fn new_retained(root: PathBuf, provider: Option<GrokNativeProviderConfig>) -> Result<Self> {
-        Self::new_with_root_options(root, provider, Vec::new(), true, false, false, false)
+        Self::new_with_root_options(
+            root,
+            provider,
+            Vec::new(),
+            true,
+            NativeSyncOptions::default(),
+        )
     }
 
     pub fn new_retained_with_injected_models(
@@ -275,14 +300,29 @@ impl WindowsDirectRuntime {
         provider: Option<GrokNativeProviderConfig>,
         injected_models: Vec<InjectedModelDescriptor>,
     ) -> Result<Self> {
-        Self::new_with_root_options(root, provider, injected_models, true, false, false, false)
+        Self::new_with_root_options(
+            root,
+            provider,
+            injected_models,
+            true,
+            NativeSyncOptions::default(),
+        )
     }
 
     pub fn new_retained_with_native_auth_sync(
         root: PathBuf,
         provider: Option<GrokNativeProviderConfig>,
     ) -> Result<Self> {
-        Self::new_with_root_options(root, provider, Vec::new(), true, true, false, false)
+        Self::new_with_root_options(
+            root,
+            provider,
+            Vec::new(),
+            true,
+            NativeSyncOptions {
+                auth: true,
+                ..NativeSyncOptions::default()
+            },
+        )
     }
 
     pub fn new_retained_with_native_auth_sync_and_injected_models(
@@ -290,7 +330,16 @@ impl WindowsDirectRuntime {
         provider: Option<GrokNativeProviderConfig>,
         injected_models: Vec<InjectedModelDescriptor>,
     ) -> Result<Self> {
-        Self::new_with_root_options(root, provider, injected_models, true, true, false, false)
+        Self::new_with_root_options(
+            root,
+            provider,
+            injected_models,
+            true,
+            NativeSyncOptions {
+                auth: true,
+                ..NativeSyncOptions::default()
+            },
+        )
     }
 
     pub fn new_retained_with_native_state_sync_and_injected_models(
@@ -299,6 +348,7 @@ impl WindowsDirectRuntime {
         injected_models: Vec<InjectedModelDescriptor>,
         sync_native_auth: bool,
         sync_native_sessions: bool,
+        sync_native_goals: bool,
         sync_native_skills: bool,
     ) -> Result<Self> {
         Self::new_with_root_options(
@@ -306,9 +356,12 @@ impl WindowsDirectRuntime {
             provider,
             injected_models,
             true,
-            sync_native_auth,
-            sync_native_sessions,
-            sync_native_skills,
+            NativeSyncOptions {
+                auth: sync_native_auth,
+                sessions: sync_native_sessions,
+                goals: sync_native_goals,
+                skills: sync_native_skills,
+            },
         )
     }
 
@@ -317,9 +370,7 @@ impl WindowsDirectRuntime {
         provider: Option<GrokNativeProviderConfig>,
         injected_models: Vec<InjectedModelDescriptor>,
         retain_root: bool,
-        sync_native_auth: bool,
-        sync_native_sessions: bool,
-        sync_native_skills: bool,
+        native_sync: NativeSyncOptions,
     ) -> Result<Self> {
         if !root.is_absolute() {
             bail!("isolated Windows runtime root must be absolute");
@@ -329,6 +380,9 @@ impl WindowsDirectRuntime {
         }
         if provider.is_none() && !injected_models.is_empty() {
             bail!("injected model metadata requires a configured provider");
+        }
+        if native_sync.goals && !native_sync.sessions {
+            bail!("native Goal synchronization requires native task synchronization");
         }
         for model in &injected_models {
             model.validate()?;
@@ -340,9 +394,7 @@ impl WindowsDirectRuntime {
             job: None,
             owns_root: false,
             retain_root,
-            sync_native_auth,
-            sync_native_sessions,
-            sync_native_skills,
+            native_sync,
             blocked_environment_keys: BTreeSet::new(),
             root_lock: None,
             cdp: crate::LoopbackCdpClient::default(),
@@ -482,7 +534,7 @@ impl DirectRuntimeBackend for WindowsDirectRuntime {
                 contract.isolated_codex_home(),
                 &contract.isolated_codex_home().join("sqlite"),
             )?;
-            if self.sync_native_auth {
+            if self.native_sync.auth {
                 let provider_credential = match &self.provider {
                         Some(provider) => Some(env::var_os(&provider.env_key).ok_or_else(|| {
                             anyhow::anyhow!(
@@ -497,14 +549,32 @@ impl DirectRuntimeBackend for WindowsDirectRuntime {
                     provider_credential.as_deref(),
                 )?;
             }
-            if self.sync_native_sessions {
+            let shared_thread_ids = if self.native_sync.sessions {
                 sync_native_session_snapshots(
                     contract.daily_codex_home(),
                     contract.isolated_codex_home(),
                     GROK_NATIVE_PROVIDER_ID,
-                )?;
+                )?
+                .shared_thread_ids
+            } else {
+                Vec::new()
+            };
+            if self.native_sync.goals && !shared_thread_ids.is_empty() {
+                let manifest = contract
+                    .isolated_codex_home()
+                    .join("goal-intent-sync-manifest.json");
+                if sync_native_goal_intents_via_official_app_server(
+                    contract.daily_codex_home(),
+                    contract.isolated_codex_home(),
+                    &shared_thread_ids,
+                    &manifest,
+                )?
+                .is_none()
+                {
+                    bail!("native Goal synchronization requires an accessible official Codex CLI");
+                }
             }
-            if self.sync_native_skills {
+            if self.native_sync.skills {
                 sync_native_skills(contract.daily_codex_home(), contract.isolated_codex_home())?;
             }
             if let Some(provider) = &self.provider {

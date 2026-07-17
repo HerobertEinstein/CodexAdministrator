@@ -38,6 +38,7 @@ impl SupervisorGeneration {
         if mode == SupervisorMode::ManagementOnly {
             launch_settings.selected_models.clear();
             launch_settings.sync_native_sessions = false;
+            launch_settings.sync_native_goals = false;
             credential = None;
         }
         Ok(Self {

@@ -12,6 +12,8 @@ mod isolation;
 mod launcher;
 mod launcher_settings;
 mod model_discovery;
+#[cfg(windows)]
+mod native_goal_sync;
 mod native_model_catalog;
 mod native_provider;
 #[cfg(windows)]
@@ -63,6 +65,11 @@ pub use launcher_settings::{
 pub use model_discovery::{
     DiscoveredModel, fetch_model_list, injectable_grok_models, is_reviewed_grok_model_id,
     model_list_url, parse_model_list, search_models,
+};
+#[cfg(windows)]
+pub use native_goal_sync::{
+    NativeGoalIntent, NativeGoalStatus, NativeGoalStore, NativeGoalSyncReceipt,
+    sync_native_goal_intents, sync_native_goal_intents_via_official_app_server,
 };
 pub use native_model_catalog::{
     install_grok_native_model_catalog, remove_grok_native_model_catalog,

@@ -245,6 +245,27 @@ daily conversation inputs are `sessions/**/*.jsonl`,
 `config.toml`, SQLite/WAL/SHM files, logs, goals, memories, hard links,
 junctions, and symbolic links are never copied or shared.
 
+Goal intent synchronization is disabled by default. When explicitly enabled,
+it also requires native task synchronization and an accessible official Codex
+CLI installation. The launcher starts short-lived official app-server helpers
+with plugin and app loading disabled, then uses only `thread/goal/get`,
+`thread/goal/set`, and `thread/goal/clear` for thread IDs present in the shared
+session index. It never opens, copies, or rewrites a Goal SQLite database.
+
+`goal-intent-sync-manifest.json` provides a three-way base for two-way semantic
+synchronization. A change on only one side is applied through the official RPC
+to the other side. Different changes on both sides, or a destination that
+changes during the write gate, remain a review conflict and neither side is
+overwritten. Only `objective`, `status`, and `tokenBudget` are shared; token and
+elapsed-time counters remain instance-local because the official write API does
+not accept those counters.
+
+Global preferences, project memory, and Skill-evolution decisions are not
+mirrored as `CODEX_HOME` databases. User-owned canonical files and repositories
+referenced by custom Skills can be read or updated by either instance under
+their own review rules, while custom Skill installation itself remains the
+one-way manifest-owned projection described above.
+
 Rollouts are read without blocking the daily instance. The importer verifies
 the file identity, size, modification time, complete JSONL shape, full hash, and
 a second consistency pass before atomically publishing a private copy. The

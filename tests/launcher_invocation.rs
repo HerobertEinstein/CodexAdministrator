@@ -22,6 +22,7 @@ fn settings() -> LauncherSettings {
         ],
         sync_native_auth: true,
         sync_native_sessions: true,
+        sync_native_goals: true,
         ..LauncherSettings::default()
     }
 }
@@ -50,6 +51,7 @@ fn launcher_arguments_use_dynamic_selected_models_without_containing_the_secret(
     assert!(rendered.contains("--retain-instance-root"));
     assert!(rendered.contains("--sync-native-auth"));
     assert!(rendered.contains("--sync-native-sessions"));
+    assert!(rendered.contains("--sync-native-goals"));
     assert!(rendered.contains("--sync-native-skills"));
     assert!(rendered.contains("--credential-present"));
     assert!(!rendered.contains("test-provider-secret"));
@@ -62,6 +64,7 @@ fn launcher_arguments_follow_disabled_native_sync_settings() {
     let mut settings = settings();
     settings.sync_native_auth = false;
     settings.sync_native_sessions = false;
+    settings.sync_native_goals = false;
     settings.sync_native_skills = false;
     let args = build_direct_launcher_arguments(&settings, Path::new(r"C:\isolated"), true).unwrap();
     let rendered = args
@@ -72,6 +75,7 @@ fn launcher_arguments_follow_disabled_native_sync_settings() {
 
     assert!(!rendered.contains("--sync-native-auth"));
     assert!(!rendered.contains("--sync-native-sessions"));
+    assert!(!rendered.contains("--sync-native-goals"));
     assert!(!rendered.contains("--sync-native-skills"));
 }
 
@@ -115,6 +119,7 @@ fn launcher_arguments_allow_management_only_startup_without_selected_models() {
     assert!(rendered.contains("--action-path /responses"));
     assert!(rendered.contains("--sync-native-auth"));
     assert!(!rendered.contains("--sync-native-sessions"));
+    assert!(!rendered.contains("--sync-native-goals"));
     assert!(rendered.contains("--sync-native-skills"));
     assert!(!rendered.contains("--credential-present"));
 }

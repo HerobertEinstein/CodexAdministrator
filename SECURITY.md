@@ -32,7 +32,15 @@ adapter, or modify an official installation.
   with non-secret-looking variable names must be unset before launch.
 - Native authentication, custom Skills, and optional task snapshots are copied
   one-way into a project-owned isolated home. Daily state is never modified or
-  shared in place.
+  shared in place by those copy flows.
+- Goal intent synchronization is disabled by default. If the user opts in, the
+  launcher discovers the native binary from an installed official npm Codex
+  package, disables plugins and apps in its short-lived app-server helpers,
+  scrubs secret-shaped environment variables, and uses only
+  `thread/goal/get|set|clear`. It never copies Goal SQLite files. One-sided
+  objective/status/token-budget changes may update the other home through the
+  official API; divergent or concurrently changed destinations remain
+  conflicts, and token and elapsed-time counters remain instance-local.
 - Hard-linked `auth.json` and task snapshots are rejected, along with reparse
   points and other shared-path aliases that could break copy isolation.
 - Hard-linked custom Skill files are excluded. The official `.system` tree,

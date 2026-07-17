@@ -266,6 +266,7 @@ fn public_docs_match_the_headless_launcher_and_current_write_surface() {
         "Credential Manager",
         "auth.json",
         "sessions/**/*.jsonl",
+        "goal-intent-sync-manifest.json",
         "renderer-addon",
     ] {
         assert!(
@@ -317,6 +318,9 @@ fn public_docs_record_current_control_and_state_safety_boundaries() {
         "`skill-projection-manifest.json`",
         "Hard-linked custom Skill files are excluded",
         "Modified isolated Skill projections are never written back",
+        "Goal intent synchronization is disabled by default",
+        "thread/goal/get",
+        "token and elapsed-time counters remain instance-local",
         "Existing tool configuration is preserved",
         "The stored credential includes an endpoint fingerprint",
         "secret-shaped inherited environment variables",

@@ -8,6 +8,7 @@ injection, host adapters, compatibility gates, or update isolation.
 - [Isolated official desktop instance](decisions/isolated-official-desktop-instance.md)
 - [Native state import boundary](decisions/native-state-import-boundary.md)
 - [Custom Skill projection boundary](decisions/custom-skill-projection-boundary.md)
+- [Goal intent sync boundary](decisions/goal-intent-sync-boundary.md)
 - [Multi-injector composition boundary](decisions/multi-injector-composition-boundary.md)
 - [No standalone Grok runtime](decisions/no-standalone-grok-runtime.md)
 - [GitHub publication freshness gate](decisions/github-publication-freshness-gate.md)

@@ -235,6 +235,21 @@ allowlist is exactly `sessions/**/*.jsonl`, `archived_sessions/**/*.jsonl`, and
 `session_index.jsonl`. It never reads or copies daily `config.toml`, SQLite,
 WAL, SHM, logs, goals, memories, junctions, symbolic links, or hard links.
 
+Goal intent synchronization is disabled by default and cannot be enabled
+without task synchronization. When enabled, a separately installed official
+Codex CLI starts short-lived stdio app-server processes against the daily and
+isolated homes with plugins and apps disabled. The bridge calls only
+`thread/goal/get`, `thread/goal/set`, and `thread/goal/clear`; raw Goal SQLite,
+WAL, and SHM files remain outside the read and write surface.
+
+The isolated `goal-intent-sync-manifest.json` stores the last common Goal
+intent for each thread in the merged session index. One-sided changes propagate
+in either direction through official RPC. Divergent changes and a destination
+that changes during the pre-write re-read remain conflicts without overwrite.
+The synchronized intent is limited to objective, status, and optional token
+budget. Token and elapsed-time counters remain instance-local because the
+official Goal write API exposes no counter import.
+
 Source rollouts use non-blocking shared reads. Before publication, the importer
 checks the native file identity, size, modification time, complete line-valid
 JSONL, full source hash, and a second stable read. Canonical provider metadata
@@ -254,6 +269,9 @@ an interrupted manifest write, keeps one active-or-archived private copy per
 thread, and gives any locally changed isolated rollout precedence. The private
 `session_index.jsonl` uses official last-entry semantics and preserves a newer
 isolated name. No imported state is written back to the daily `CODEX_HOME`.
+The optional Goal bridge is the sole exception to daily-state read-only policy:
+it may update only the official thread Goal intent through app-server RPC after
+the user opts in; it never writes daily files directly.
 
 Persistent shutdown still terminates the Job Object, tracks escaped
 descendants to quiescence, and closes the loopback listener before releasing

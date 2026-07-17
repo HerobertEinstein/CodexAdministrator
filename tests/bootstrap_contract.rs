@@ -81,6 +81,7 @@ fn renders_an_idempotent_namespaced_native_provider_bridge() {
     assert!(script.contains("https://ai.hebox.net/v1"));
     assert!(script.contains("\"actionPath\":\"/responses\""));
     assert!(script.contains("\"credentialPresent\":"));
+    assert!(script.contains("\"syncNativeGoals\":false"));
     assert!(script.contains("\"syncNativeSkills\":true"));
     assert!(!script.contains("credentialValue"));
     assert!(!script.contains("apiKeyValue"));
