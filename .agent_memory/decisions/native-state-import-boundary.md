@@ -41,6 +41,12 @@ flow. It may update objective/status/token-budget state in either home only
 after explicit opt-in; it never widens this file-import allowlist or copies Goal
 database files and counters.
 
+This one-way import is a visibility mechanism, not live or lossless session
+collaboration. The daily and isolated copies can have different latest turns,
+statuses, and item identities after either lane advances. Real collaboration
+therefore requires the separate dual-head boundary in
+`dual-head-session-continuity-boundary.md`.
+
 ## Import Contract
 
 Rollouts use non-blocking shared reads so the daily instance is not held for a
@@ -63,5 +69,5 @@ Keep complete conversation import enabled by default for managed launches while
 retaining the explicit privacy/space/provider warning and a visible opt-out.
 Synchronization remains one-way and incremental at launch. Do not broaden the
 daily read allowlist, share SQLite, copy daily configuration, or advertise
-resume parity without new tests and a real official app-server list/read/resume
-E2E.
+resume parity, real-time awareness, or lossless collaboration without the
+dual-head tests and a real official app-server read/turn/fork E2E.

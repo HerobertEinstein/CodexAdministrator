@@ -6,7 +6,10 @@ use std::{
     os::windows::fs::{OpenOptionsExt, symlink_file},
 };
 
-use codex_administrator::{install_isolated_sqlite_home, sync_native_session_snapshots};
+use codex_administrator::{
+    NativeSharedSessionRollout, install_isolated_sqlite_home, native_shared_session_rollouts,
+    sync_native_session_snapshots,
+};
 use filetime::FileTime;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -85,6 +88,14 @@ fn stable_daily_rollouts_are_atomically_imported_without_copying_sqlite() {
         assert!(!isolated.join(forbidden).exists(), "copied {forbidden}");
     }
     assert!(isolated.join("session-import-manifest.json").is_file());
+    assert_eq!(
+        native_shared_session_rollouts(&daily, &isolated).unwrap(),
+        vec![NativeSharedSessionRollout {
+            thread_id: THREAD_ID.to_owned(),
+            daily_path: fs::canonicalize(&source).unwrap(),
+            isolated_path: fs::canonicalize(&destination).unwrap(),
+        }]
+    );
     assert!(
         fs::read_to_string(isolated.join("session_index.jsonl"))
             .unwrap()

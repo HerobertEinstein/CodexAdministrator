@@ -16,6 +16,9 @@ mod model_discovery;
 mod native_goal_sync;
 mod native_model_catalog;
 mod native_provider;
+mod native_session_continuity;
+#[cfg(windows)]
+mod native_session_watch;
 #[cfg(windows)]
 mod native_skill_sync;
 #[cfg(windows)]
@@ -69,7 +72,8 @@ pub use model_discovery::{
 #[cfg(windows)]
 pub use native_goal_sync::{
     NativeGoalIntent, NativeGoalStatus, NativeGoalStore, NativeGoalSyncReceipt,
-    sync_native_goal_intents, sync_native_goal_intents_via_official_app_server,
+    observe_native_session_continuity_via_official_app_server, sync_native_goal_intents,
+    sync_native_goal_intents_via_official_app_server,
 };
 pub use native_model_catalog::{
     install_grok_native_model_catalog, remove_grok_native_model_catalog,
@@ -78,11 +82,19 @@ pub use native_provider::{
     GROK_NATIVE_PROVIDER_ID, GrokNativeProviderConfig, NativeProviderInstallReceipt,
     install_grok_native_provider, remove_grok_native_provider,
 };
+pub use native_session_continuity::{
+    NativeSessionContinuity, NativeSessionContinuityReceipt, NativeSessionHead,
+    NativeSessionHeadStore, NativeSessionRelation, NativeTurnCheckpoint, NativeTurnStatus,
+    compare_native_session_heads, observe_native_session_continuity,
+};
+#[cfg(windows)]
+pub use native_session_watch::NativeSessionChangeMonitor;
 #[cfg(windows)]
 pub use native_skill_sync::{NativeSkillSyncReceipt, sync_native_skills};
 #[cfg(windows)]
 pub use native_state_sync::{
-    NativeSessionSyncReceipt, install_isolated_sqlite_home, sync_native_session_snapshots,
+    NativeSessionSyncReceipt, NativeSharedSessionRollout, install_isolated_sqlite_home,
+    native_shared_session_rollouts, sync_native_session_snapshots,
 };
 pub use renderer_addons::{
     RendererAddonBundle, RendererAddonCatalogEntry, RendererAddonPolicy, RendererAddonReport,

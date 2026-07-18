@@ -13,15 +13,22 @@ use std::{
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::os::windows::process::CommandExt;
 
-use crate::{environment_variable_is_sensitive, install_bootstrap_atomically};
+use crate::{
+    NativeSessionContinuityReceipt, NativeSessionHead, NativeSessionHeadStore,
+    NativeTurnCheckpoint, NativeTurnStatus, environment_variable_is_sensitive,
+    install_bootstrap_atomically, observe_native_session_continuity,
+};
 
 const MANIFEST_VERSION: u8 = 1;
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_PROTOCOL_LINE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_OBJECTIVE_BYTES: usize = 1024 * 1024;
 const MAX_SHARED_THREADS: usize = 4096;
+const MAX_CONTINUITY_HEAD_TURNS: usize = 64;
+const CONTINUITY_TURN_PAGE_SIZE: usize = 64;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const APP_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -404,6 +411,71 @@ impl NativeGoalStore for SpawnedGoalStore {
     }
 }
 
+impl NativeSessionHeadStore for SpawnedGoalStore {
+    fn read_session_head(&mut self, thread_id: &str) -> Result<NativeSessionHead> {
+        let thread = self
+            .server_mut()?
+            .request(
+                "thread/read",
+                json!({"threadId": thread_id, "includeTurns": false}),
+            )?
+            .get("thread")
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("official thread/read response omitted thread"))?;
+        if thread.get("id").and_then(Value::as_str) != Some(thread_id) {
+            bail!("official thread/read returned a different thread id");
+        }
+        let model_provider = thread
+            .get("modelProvider")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("official thread/read omitted model provider"))?
+            .to_owned();
+
+        let mut turns = Vec::new();
+        let mut cursor = None::<String>;
+        let history_complete = loop {
+            let result = self.server_mut()?.request(
+                "thread/turns/list",
+                json!({
+                    "threadId": thread_id,
+                    "cursor": cursor,
+                    "limit": CONTINUITY_TURN_PAGE_SIZE,
+                    "sortDirection": "desc",
+                    "itemsView": "summary"
+                }),
+            )?;
+            let data = result
+                .get("data")
+                .and_then(Value::as_array)
+                .ok_or_else(|| anyhow::anyhow!("official thread/turns/list omitted data"))?;
+            for turn in data {
+                turns.push(turn_checkpoint(turn)?);
+                if turns.len() >= MAX_CONTINUITY_HEAD_TURNS {
+                    break;
+                }
+            }
+            cursor = result
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if cursor.is_none() {
+                break true;
+            }
+            if turns.len() >= MAX_CONTINUITY_HEAD_TURNS {
+                break false;
+            }
+        };
+
+        Ok(NativeSessionHead {
+            thread_id: thread_id.to_owned(),
+            model_provider,
+            turns,
+            history_complete,
+        })
+    }
+}
+
 impl SpawnedGoalStore {
     fn server_mut(
         &mut self,
@@ -552,6 +624,32 @@ where
     Ok(receipt)
 }
 
+fn observe_native_session_continuity_with_command<T>(
+    command: &AppServerCommand,
+    daily_codex_home: &Path,
+    isolated_codex_home: &Path,
+    thread_ids: T,
+    manifest_path: &Path,
+) -> Result<NativeSessionContinuityReceipt>
+where
+    T: IntoIterator,
+    T::Item: AsRef<str>,
+{
+    let daily = canonical_existing_path(daily_codex_home)?;
+    let isolated = canonical_existing_path(isolated_codex_home)?;
+    if daily == isolated {
+        bail!("daily and isolated CODEX_HOME paths must be disjoint for session continuity");
+    }
+    let mut daily_store = command.spawn(&daily)?;
+    let mut isolated_store = command.spawn(&isolated)?;
+    observe_native_session_continuity(
+        &mut daily_store,
+        &mut isolated_store,
+        thread_ids,
+        manifest_path,
+    )
+}
+
 pub fn sync_native_goal_intents_via_official_app_server<T>(
     daily_codex_home: &Path,
     isolated_codex_home: &Path,
@@ -573,6 +671,79 @@ where
         manifest_path,
     )
     .map(Some)
+}
+
+pub fn observe_native_session_continuity_via_official_app_server<T>(
+    daily_codex_home: &Path,
+    isolated_codex_home: &Path,
+    thread_ids: T,
+    manifest_path: &Path,
+) -> Result<Option<NativeSessionContinuityReceipt>>
+where
+    T: IntoIterator,
+    T::Item: AsRef<str>,
+{
+    let Some(command) = discover_codex_app_server_command()? else {
+        return Ok(None);
+    };
+    observe_native_session_continuity_with_command(
+        &command,
+        daily_codex_home,
+        isolated_codex_home,
+        thread_ids,
+        manifest_path,
+    )
+    .map(Some)
+}
+
+fn turn_checkpoint(turn: &Value) -> Result<NativeTurnCheckpoint> {
+    let id = turn
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("official turn omitted id"))?
+        .to_owned();
+    let status: NativeTurnStatus = serde_json::from_value(
+        turn.get("status")
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("official turn omitted status"))?,
+    )
+    .context("official turn returned an unsupported status")?;
+    let item_keys = turn
+        .get("items")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("official turn omitted items"))?
+        .iter()
+        .map(|item| {
+            Ok(json!({
+                "id": item
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("official turn item omitted id"))?,
+                "type": item
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("official turn item omitted type"))?
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let canonical = json!({
+        "id": id,
+        "status": turn.get("status").cloned().unwrap_or(Value::Null),
+        "startedAt": turn.get("startedAt").cloned().unwrap_or(Value::Null),
+        "completedAt": turn.get("completedAt").cloned().unwrap_or(Value::Null),
+        "durationMs": turn.get("durationMs").cloned().unwrap_or(Value::Null),
+        "error": turn.get("error").cloned().unwrap_or(Value::Null),
+        "items": item_keys
+    });
+    let fingerprint = format!("{:x}", Sha256::digest(serde_json::to_vec(&canonical)?));
+    Ok(NativeTurnCheckpoint {
+        id,
+        fingerprint,
+        status,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -1193,6 +1364,93 @@ mod tests {
     }
 
     #[test]
+    fn spawned_app_servers_observe_both_session_heads_without_copying_rollouts() {
+        let temp = tempdir().unwrap();
+        let daily = temp.path().join("daily");
+        let isolated = temp.path().join("isolated");
+        fs::create_dir_all(&daily).unwrap();
+        fs::create_dir_all(&isolated).unwrap();
+        let thread_id = "019f2164-bb7b-76a1-bed5-8f7ff7f6a26e";
+        for home in [&daily, &isolated] {
+            fs::write(
+                home.join("fake-threads.json"),
+                serde_json::to_vec(&json!([thread_id])).unwrap(),
+            )
+            .unwrap();
+        }
+        let common = json!({
+            "id": "turn-common",
+            "items": [{"id": "item-common", "type": "agentMessage", "text": "common"}],
+            "itemsView": "full",
+            "status": "completed",
+            "error": null,
+            "startedAt": 1,
+            "completedAt": 2,
+            "durationMs": 1000
+        });
+        fs::write(
+            daily.join("fake-turns.json"),
+            serde_json::to_vec(&json!({thread_id: [
+                {
+                    "id": "turn-daily",
+                    "items": [{"id": "item-daily", "type": "agentMessage", "text": "daily"}],
+                    "itemsView": "full",
+                    "status": "completed",
+                    "error": null,
+                    "startedAt": 3,
+                    "completedAt": 4,
+                    "durationMs": 1000
+                },
+                common.clone()
+            ]}))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            isolated.join("fake-turns.json"),
+            serde_json::to_vec(&json!({thread_id: [
+                {
+                    "id": "turn-isolated",
+                    "items": [{"id": "item-isolated", "type": "agentMessage", "text": "isolated"}],
+                    "itemsView": "full",
+                    "status": "interrupted",
+                    "error": null,
+                    "startedAt": 3,
+                    "completedAt": null,
+                    "durationMs": null
+                },
+                common
+            ]}))
+            .unwrap(),
+        )
+        .unwrap();
+        let script = temp.path().join("fake-app-server.mjs");
+        fs::write(&script, FAKE_APP_SERVER).unwrap();
+        let command = AppServerCommand {
+            program: find_node_executable(),
+            prefix_args: vec![script.into_os_string()],
+        };
+        let manifest = isolated.join("session-continuity-manifest.json");
+
+        let receipt = observe_native_session_continuity_with_command(
+            &command,
+            &daily,
+            &isolated,
+            [thread_id],
+            &manifest,
+        )
+        .unwrap();
+
+        assert_eq!(receipt.threads, 1);
+        assert_eq!(receipt.diverged, 1);
+        let saved: Value = serde_json::from_slice(&fs::read(manifest).unwrap()).unwrap();
+        assert_eq!(
+            saved["records"][thread_id]["continuity"]["commonTurnId"],
+            "turn-common"
+        );
+    }
+
+    #[test]
     fn npm_codex_native_app_server_is_discovered_without_using_the_windowsapps_alias() {
         let temp = tempdir().unwrap();
         let bin = temp.path().join("bin");
@@ -1252,6 +1510,7 @@ const home = process.env.CODEX_HOME;
 const statePath = join(home, "fake-goals.json");
 const threadsPath = join(home, "fake-threads.json");
 const goalCapablePath = join(home, "fake-goal-capable.json");
+const turnsPath = join(home, "fake-turns.json");
 const load = () => {
   try { return JSON.parse(readFileSync(statePath, "utf8")); }
   catch { return {}; }
@@ -1283,6 +1542,32 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line)
     return;
   }
   const threadId = request.params.threadId;
+  let turns = {};
+  try { turns = JSON.parse(readFileSync(turnsPath, "utf8")); } catch {}
+  if (request.method === "thread/read") {
+    send({ id: request.id, result: { thread: {
+      id: threadId,
+      sessionId: threadId,
+      modelProvider: home.endsWith("isolated") ? "grok_native" : "hebox",
+      status: { type: "notLoaded" },
+      turns: [],
+      cliVersion: "fake",
+      createdAt: 1,
+      updatedAt: 2,
+      cwd: home,
+      ephemeral: false,
+      preview: ""
+    }}});
+    return;
+  }
+  if (request.method === "thread/turns/list") {
+    send({ id: request.id, result: {
+      data: turns[threadId] ?? [],
+      nextCursor: null,
+      backwardsCursor: null
+    }});
+    return;
+  }
   let goalCapable = [];
   try { goalCapable = JSON.parse(readFileSync(goalCapablePath, "utf8")); } catch {}
   if (!goalCapable.includes(threadId)) {

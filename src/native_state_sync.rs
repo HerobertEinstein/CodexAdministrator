@@ -47,6 +47,13 @@ pub struct NativeSessionSyncReceipt {
     pub shared_thread_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeSharedSessionRollout {
+    pub thread_id: String,
+    pub daily_path: PathBuf,
+    pub isolated_path: PathBuf,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct SessionImportManifest {
@@ -127,6 +134,50 @@ pub fn install_isolated_sqlite_home(
     document["sqlite_home"] = value(sqlite);
     install_bootstrap_atomically(config_path, document.to_string().as_bytes())?;
     Ok(())
+}
+
+pub fn native_shared_session_rollouts(
+    daily_codex_home: &Path,
+    isolated_codex_home: &Path,
+) -> Result<Vec<NativeSharedSessionRollout>> {
+    if !daily_codex_home.is_absolute() || !isolated_codex_home.is_absolute() {
+        bail!("native shared session roots must be absolute");
+    }
+    let daily = fs::canonicalize(daily_codex_home).with_context(|| {
+        format!(
+            "failed to resolve daily CODEX_HOME {}",
+            daily_codex_home.display()
+        )
+    })?;
+    let isolated = fs::canonicalize(isolated_codex_home).with_context(|| {
+        format!(
+            "failed to resolve isolated CODEX_HOME {}",
+            isolated_codex_home.display()
+        )
+    })?;
+    if daily == isolated {
+        bail!("native shared session roots must be disjoint");
+    }
+    let manifest = load_manifest(&isolated.join("session-import-manifest.json"))?;
+    let mut rollouts = Vec::with_capacity(manifest.files.len());
+    for (key, record) in manifest.files {
+        validate_thread_id(&record.thread_id)?;
+        let relative = validated_manifest_relative_path(&key)?;
+        if thread_id_from_rollout_path(&relative).as_deref() != Some(record.thread_id.as_str()) {
+            bail!("session import manifest thread id does not match its rollout path");
+        }
+        rollouts.push(NativeSharedSessionRollout {
+            thread_id: record.thread_id,
+            daily_path: daily.join(&relative),
+            isolated_path: isolated.join(relative),
+        });
+    }
+    rollouts.sort_by(|left, right| {
+        left.thread_id
+            .cmp(&right.thread_id)
+            .then_with(|| left.daily_path.cmp(&right.daily_path))
+    });
+    Ok(rollouts)
 }
 
 pub fn sync_native_session_snapshots(
