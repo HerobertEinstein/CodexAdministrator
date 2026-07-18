@@ -62,7 +62,7 @@ fn guarded_startup_prepares_injection_only_for_an_exact_approved_identity() {
     let appdata = temp.path().join("AppData").join("Roaming");
     let sha256 = "a".repeat(64);
     let policy = CompatibilityPolicy::default()
-        .allow_host_sha256(HostAdapterKind::CodexPlusPlus, &sha256)
+        .allow_isolated_codex_plus_host_sha256(&sha256)
         .unwrap();
 
     let outcome = prepare_codex_plus_host_guarded(
@@ -128,7 +128,7 @@ fn guarded_startup_fails_closed_when_bootstrap_preparation_fails() {
     fs::write(root.join("user_scripts.json"), b"not-json").unwrap();
     let sha256 = "a".repeat(64);
     let policy = CompatibilityPolicy::default()
-        .allow_host_sha256(HostAdapterKind::CodexPlusPlus, &sha256)
+        .allow_isolated_codex_plus_host_sha256(&sha256)
         .unwrap();
 
     let outcome = prepare_codex_plus_host_guarded(

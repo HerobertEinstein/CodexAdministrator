@@ -85,7 +85,10 @@ release or supported installer deployment.
   checkout; changed assets disable only that payload.
 - Codex++ compatibility remains disabled. The shipped compatibility manifest is
   empty, so an unverified Codex++ build stays native and is not launched by
-  Administrator. `doctor` discovers explicit, default, and Windows-registered
+  Administrator. Schema 2 rejects a Codex++ hash unless the same entry declares
+  `composition_contract=isolated_codex_plus_owner_v1` and immutable E2E
+  evidence for a disjoint profile, `CODEX_HOME`, process tree, and daily-instance
+  preservation. `doctor` discovers explicit, default, and Windows-registered
   install locations, but reports discovery and compatibility separately:
   `found=true` does not imply `eligible=true`.
 
@@ -313,7 +316,10 @@ host list is empty. The adapter code is a fail-closed future integration
 surface, not an available runtime option. Unknown releases remove only a stale
 Administrator-owned script/config key, report `native_fallback`, and are not
 launched by Administrator. Enabling a future identity requires its exact
-executable SHA-256 and matching host/composition E2E in the same publication.
+executable SHA-256, the schema-2
+`composition_contract=isolated_codex_plus_owner_v1` gate, and matching
+host/composition E2E in the same publication. A hash-only policy entry is
+rejected before it can write the external script or launch Codex++.
 The Windows doctor probe checks `CODEX_PLUS_PLUS_PATH`, standard installation
 directories, and the publisher's uninstall registration. Its JSON output keeps
 `found`, `path`, `eligible`, and `reason` distinct so a custom installation is

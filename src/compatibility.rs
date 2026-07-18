@@ -18,12 +18,27 @@ pub struct CompatibilityPolicy {
 
 impl CompatibilityPolicy {
     pub fn allow_host_sha256(mut self, adapter: HostAdapterKind, sha256: &str) -> Result<Self> {
+        if adapter == HostAdapterKind::CodexPlusPlus {
+            bail!(
+                "Codex++ host approval requires the isolated_codex_plus_owner_v1 composition contract"
+            );
+        }
+        self.insert_host_sha256(adapter, sha256)?;
+        Ok(self)
+    }
+
+    pub fn allow_isolated_codex_plus_host_sha256(mut self, sha256: &str) -> Result<Self> {
+        self.insert_host_sha256(HostAdapterKind::CodexPlusPlus, sha256)?;
+        Ok(self)
+    }
+
+    fn insert_host_sha256(&mut self, adapter: HostAdapterKind, sha256: &str) -> Result<()> {
         let sha256 = normalize_sha256(sha256)?;
         self.allowed_host_sha256
             .entry(adapter)
             .or_default()
             .insert(sha256);
-        Ok(self)
+        Ok(())
     }
 
     pub fn evaluate(
@@ -99,6 +114,14 @@ struct CompatibilityManifestEntry {
     project_version: String,
     bootstrap_version: u8,
     evidence_sha256: String,
+    #[serde(default)]
+    composition_contract: Option<HostCompositionContract>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum HostCompositionContract {
+    IsolatedCodexPlusOwnerV1,
 }
 
 impl CompatibilityManifest {
@@ -109,7 +132,7 @@ impl CompatibilityManifest {
     pub fn from_json(content: &[u8]) -> Result<Self> {
         let manifest: Self =
             serde_json::from_slice(content).context("invalid compatibility manifest")?;
-        if manifest.schema_version != 1 {
+        if manifest.schema_version != 2 {
             bail!(
                 "unsupported compatibility manifest schema version {}",
                 manifest.schema_version
@@ -146,7 +169,24 @@ impl CompatibilityManifest {
                 }
                 normalize_sha256(&host.evidence_sha256)
                     .context("compatibility entry has an invalid E2E evidence digest")?;
-                policy.allow_host_sha256(host.adapter, &host.sha256)
+                match host.adapter {
+                    HostAdapterKind::Direct => {
+                        if host.composition_contract.is_some() {
+                            bail!("Direct hosts cannot use a Codex++ composition contract");
+                        }
+                        policy.allow_host_sha256(host.adapter, &host.sha256)
+                    }
+                    HostAdapterKind::CodexPlusPlus => {
+                        if host.composition_contract
+                            != Some(HostCompositionContract::IsolatedCodexPlusOwnerV1)
+                        {
+                            bail!(
+                                "Codex++ host approval requires composition_contract=isolated_codex_plus_owner_v1"
+                            );
+                        }
+                        policy.allow_isolated_codex_plus_host_sha256(&host.sha256)
+                    }
+                }
             })
     }
 }

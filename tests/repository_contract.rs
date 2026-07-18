@@ -450,7 +450,21 @@ fn unverified_codexplusplus_does_not_receive_renderer_addons() {
     let compatibility: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(root().join("compatibility.json")).unwrap())
             .unwrap();
+    assert_eq!(compatibility["schema_version"], 2);
     assert_eq!(compatibility["hosts"].as_array().unwrap().len(), 0);
+
+    for path in [
+        "README.md",
+        "docs/ARCHITECTURE.md",
+        "docs/COMPATIBILITY.md",
+        "docs/HOST_ADAPTERS.md",
+    ] {
+        let content = fs::read_to_string(root().join(path)).unwrap();
+        assert!(
+            content.contains("isolated_codex_plus_owner_v1"),
+            "{path} does not state the Codex++ isolated-owner compatibility contract"
+        );
+    }
 
     let addons: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(root().join("renderer-addons.json")).unwrap())

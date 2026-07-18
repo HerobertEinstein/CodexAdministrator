@@ -50,7 +50,10 @@ list is empty. Source familiarity, a local installation, or a prior version
 audit is not compatibility evidence for a new executable identity. Eligibility
 requires an exact binary hash plus host/composition E2E. Compatibility fallback
 removes only stale Administrator-owned extension residue and must not launch an
-unverified host.
+unverified host. Schema 2 additionally requires
+`composition_contract=isolated_codex_plus_owner_v1`; the programmatic policy API
+rejects a Codex++ hash without that contract, so identity alone cannot silently
+turn this future surface into a launch path.
 
 ## Codex Dream Skin Boundary
 

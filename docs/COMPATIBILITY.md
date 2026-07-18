@@ -1,20 +1,28 @@
 # Compatibility
 
-Codex++ compatibility is granted to an exact reviewed executable identity and
-bootstrap version. Direct compatibility is established from the protected
+Codex++ compatibility is granted to an exact reviewed executable identity,
+bootstrap version, and isolated-owner composition contract. Direct compatibility is established from the protected
 official package location, the suspended process image and package family, and
 live isolation, CDP, bridge, and UI gates. Neither path trusts a product name
 alone.
 
 ## Host Gate
 
-`compatibility.json` contains reviewed host entries with:
+Schema-2 `compatibility.json` contains reviewed host entries with:
 
 - adapter identity;
 - executable SHA-256;
 - Codex Administrator version;
 - bootstrap protocol version; and
-- immutable E2E evidence SHA-256.
+- immutable E2E evidence SHA-256; and
+- for Codex++,
+  `composition_contract=isolated_codex_plus_owner_v1`.
+
+The Codex++ contract means its exact reviewed build proved a project-disjoint
+profile, `CODEX_HOME`, state/SQLite, process tree, guard/CDP/helper ports, and
+daily-instance preservation while remaining the sole owner. An executable hash
+alone is not an approval: hash-only Codex++ entries are rejected by the manifest
+loader and `CompatibilityPolicy` before any external script write or launch.
 
 An unknown, changed, malformed, or unsupported entry fails closed. For
 Codex++, failure removes only this project's stale external script and leaves

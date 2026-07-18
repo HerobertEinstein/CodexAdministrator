@@ -30,7 +30,9 @@ The owner installation is Codex++ `1.2.34`. Its launcher and manager match the
 official GitHub release ZIP byte-for-byte. The shipped compatibility manifest
 remains empty because official asset identity is necessary but not sufficient:
 separate profile, `CODEX_HOME`, process ownership, daily-instance preservation,
-and user-script composition E2E are still required.
+and user-script composition E2E are still required. Schema 2 now encodes that
+boundary as `composition_contract=isolated_codex_plus_owner_v1`; a hash-only
+Codex++ approval is rejected.
 
 ## Use Next Time
 

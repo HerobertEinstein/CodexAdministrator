@@ -14,3 +14,4 @@ injection, host adapters, compatibility gates, or update isolation.
 - [No standalone Grok runtime](decisions/no-standalone-grok-runtime.md)
 - [GitHub publication freshness gate](decisions/github-publication-freshness-gate.md)
 - [Codex++ custom install discovery](bugs/codex-plus-custom-install-discovery.md)
+- [Codex++ isolated owner compatibility contract](decisions/codex-plus-isolated-owner-contract.md)

@@ -98,8 +98,13 @@ It writes the generated bridge atomically and enables only
 fields are preserved. Removal deletes only that file and key.
 
 The adapter is enabled only when the executable SHA-256 appears in the shipped
-compatibility manifest with matching project, bootstrap, and E2E evidence
-identities. Otherwise any stale project script is removed and Codex++ remains
+schema-2 compatibility manifest with matching project, bootstrap, immutable
+E2E evidence, and
+`composition_contract=isolated_codex_plus_owner_v1`. The contract represents a
+separate profile, `CODEX_HOME`, state/SQLite, process ownership, scoped ports,
+and daily-instance preservation under Codex++ ownership. A Codex++ hash without
+that contract is rejected by both the manifest loader and the programmatic
+policy API. Otherwise any stale project script is removed and Codex++ remains
 native.
 The current manifest contains no hosts, so this branch cannot enable or launch
 Codex++ injection.

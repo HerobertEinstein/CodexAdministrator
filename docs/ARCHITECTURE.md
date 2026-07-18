@@ -156,17 +156,20 @@ script reaches the page:
   verification, Windows Job Object ownership, listener-PID-bound loopback CDP,
   UI readiness, bounded reload recovery, and exact cleanup;
 - `codexplusplus`: external user script, enabled only for an exact reviewed
-  executable identity.
+  executable identity whose schema-2 entry also declares
+  `composition_contract=isolated_codex_plus_owner_v1`.
 
 No adapter may modify an official installation file.
 
 No Codex++ executable identity is currently reviewed because the shipped
 compatibility host list is empty. Source familiarity, a local installation, or
 a prior-version audit cannot enable it. Compatibility fallback does not launch
-Codex++. A future adapter may be enabled only after an exact executable hash and
-isolated profile/`CODEX_HOME`/SQLite, composition, and daily-PID-preserving E2E
-prove that Codex++ is the sole owner of a disjoint instance. Codex++ must never
-be launched inside the Direct Job Object.
+Codex++. A future adapter may be enabled only after an exact executable hash,
+the machine-readable `isolated_codex_plus_owner_v1` contract, and isolated
+profile/`CODEX_HOME`/SQLite, composition, scoped-port, and
+daily-PID-preserving E2E prove that Codex++ is the sole owner of a disjoint
+instance. Hash-only approvals are invalid. Codex++ must never be launched
+inside the Direct Job Object.
 
 ## Direct Instance Isolation
 

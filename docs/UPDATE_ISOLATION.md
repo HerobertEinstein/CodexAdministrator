@@ -69,6 +69,10 @@ never collapsed by last-writer-wins.
 ## Fail-Closed Updates
 
 An unreviewed Codex++ update disables injection for that exact host identity.
+Schema 2 also rejects a reviewed hash that lacks
+`composition_contract=isolated_codex_plus_owner_v1`; executable identity cannot
+stand in for isolated profile, `CODEX_HOME`, state, scoped-port, and process
+ownership evidence.
 A Direct update must still pass the protected package path, suspended image
 and package-family checks, separate process tree, listener-PID ownership,
 isolated target, bridge health, UI readiness, and official app-server provider
