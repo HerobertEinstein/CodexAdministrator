@@ -1,9 +1,13 @@
 use std::{
     collections::BTreeSet,
-    env, fs,
+    env,
+    ffi::{OsStr, OsString},
+    fs,
     io::{self, Read, Write},
     net::TcpListener,
+    os::windows::ffi::{OsStrExt, OsStringExt},
     path::PathBuf,
+    ptr,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -33,6 +37,13 @@ use codex_administrator::{
 };
 use directories::BaseDirs;
 use serde::Serialize;
+use windows_sys::Win32::{
+    Foundation::ERROR_SUCCESS,
+    System::Registry::{
+        HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_SZ, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6432KEY,
+        RRF_SUBKEY_WOW6464KEY, RegGetValueW,
+    },
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -788,7 +799,7 @@ fn doctor(args: DoctorArgs) -> Result<()> {
                 available: direct_available,
                 reason: direct_reason,
             },
-            codex_plus_plus: find_codex_plus_plus(),
+            codex_plus_plus: codex_plus_plus_doctor_report(),
         },
     };
     if args.json {
@@ -806,7 +817,7 @@ fn doctor(args: DoctorArgs) -> Result<()> {
         );
         println!(
             "Codex++: {}",
-            display_probe(&report.adapters.codex_plus_plus)
+            display_codex_plus_adapter(&report.adapters.codex_plus_plus)
         );
     }
     Ok(())
@@ -851,13 +862,131 @@ fn find_codex_plus_plus() -> ProbeResult {
             .join("Codex++")
             .join("codex-plus-plus.exe")
     });
+    let registered = registered_codex_plus_plus_install_locations()
+        .into_iter()
+        .map(|path| path.join("codex-plus-plus.exe"));
     ProbeResult::from_path(
         env_path
             .into_iter()
             .chain(program_files)
             .chain(local_program)
+            .chain(registered)
             .find(|candidate| candidate.is_file()),
     )
+}
+
+fn codex_plus_plus_doctor_report() -> CodexPlusAdapterReport {
+    let probe = find_codex_plus_plus();
+    let Some(path) = probe.path else {
+        return CodexPlusAdapterReport {
+            found: false,
+            path: None,
+            eligible: false,
+            reason: "not_found".into(),
+        };
+    };
+    let identity = match HostIdentity::from_executable(HostAdapterKind::CodexPlusPlus, &path) {
+        Ok(identity) => identity,
+        Err(_) => {
+            return CodexPlusAdapterReport {
+                found: true,
+                path: Some(path),
+                eligible: false,
+                reason: "host_identity_probe_failed".into(),
+            };
+        }
+    };
+    let policy = match CompatibilityManifest::shipped().and_then(CompatibilityManifest::into_policy)
+    {
+        Ok(policy) => policy,
+        Err(_) => {
+            return CodexPlusAdapterReport {
+                found: true,
+                path: Some(path),
+                eligible: false,
+                reason: "invalid_compatibility_manifest".into(),
+            };
+        }
+    };
+    match policy.evaluate(HostAdapterKind::CodexPlusPlus, Some(&identity.sha256)) {
+        CompatibilityDecision::Enabled => CodexPlusAdapterReport {
+            found: true,
+            path: Some(path),
+            eligible: true,
+            reason: "ready".into(),
+        },
+        CompatibilityDecision::NativeOnly { reason } => CodexPlusAdapterReport {
+            found: true,
+            path: Some(path),
+            eligible: false,
+            reason,
+        },
+    }
+}
+
+fn registered_codex_plus_plus_install_locations() -> Vec<PathBuf> {
+    const UNINSTALL_KEY: &str =
+        r"Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexPlusPlus";
+    [
+        (HKEY_CURRENT_USER, RRF_RT_REG_SZ),
+        (HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY),
+        (HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ | RRF_SUBKEY_WOW6432KEY),
+    ]
+    .into_iter()
+    .filter_map(|(root, flags)| registry_string(root, UNINSTALL_KEY, "InstallLocation", flags))
+    .map(PathBuf::from)
+    .collect()
+}
+
+fn registry_string(root: HKEY, subkey: &str, value_name: &str, flags: u32) -> Option<OsString> {
+    const MAX_REGISTRY_STRING_BYTES: u32 = 32 * 1024;
+    let subkey = wide_null(subkey);
+    let value_name = wide_null(value_name);
+    let mut value_type = 0;
+    let mut bytes = 0;
+    let status = unsafe {
+        RegGetValueW(
+            root,
+            subkey.as_ptr(),
+            value_name.as_ptr(),
+            flags,
+            &mut value_type,
+            ptr::null_mut(),
+            &mut bytes,
+        )
+    };
+    if status != ERROR_SUCCESS
+        || value_type != REG_SZ
+        || !(2..=MAX_REGISTRY_STRING_BYTES).contains(&bytes)
+        || bytes % 2 != 0
+    {
+        return None;
+    }
+    let mut buffer = vec![0_u16; bytes as usize / 2];
+    let status = unsafe {
+        RegGetValueW(
+            root,
+            subkey.as_ptr(),
+            value_name.as_ptr(),
+            flags,
+            &mut value_type,
+            buffer.as_mut_ptr().cast(),
+            &mut bytes,
+        )
+    };
+    if status != ERROR_SUCCESS || value_type != REG_SZ || bytes % 2 != 0 {
+        return None;
+    }
+    let units = bytes as usize / 2;
+    buffer.truncate(units.min(buffer.len()));
+    while buffer.last() == Some(&0) {
+        buffer.pop();
+    }
+    (!buffer.is_empty()).then(|| OsString::from_wide(&buffer))
+}
+
+fn wide_null(value: &str) -> Vec<u16> {
+    OsStr::new(value).encode_wide().chain(Some(0)).collect()
 }
 
 #[derive(Debug, Serialize)]
@@ -871,13 +1000,21 @@ struct DoctorReport {
 #[derive(Debug, Serialize)]
 struct AdapterReport {
     direct: DirectAdapterReport,
-    codex_plus_plus: ProbeResult,
+    codex_plus_plus: CodexPlusAdapterReport,
 }
 
 #[derive(Debug, Serialize)]
 struct DirectAdapterReport {
     implemented: bool,
     available: bool,
+    reason: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CodexPlusAdapterReport {
+    found: bool,
+    path: Option<PathBuf>,
+    eligible: bool,
     reason: String,
 }
 
@@ -925,10 +1062,13 @@ impl ProbeResult {
     }
 }
 
-fn display_probe(probe: &ProbeResult) -> String {
-    probe
-        .path
-        .as_deref()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "not found".into())
+fn display_codex_plus_adapter(report: &CodexPlusAdapterReport) -> String {
+    let Some(path) = report.path.as_deref() else {
+        return format!("not found ({})", report.reason);
+    };
+    if report.eligible {
+        format!("{} (eligible)", path.display())
+    } else {
+        format!("{} (native only: {})", path.display(), report.reason)
+    }
 }

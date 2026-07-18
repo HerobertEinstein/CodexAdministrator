@@ -1,4 +1,4 @@
-use std::{fs, process::Command};
+use std::{env, fs, path::PathBuf, process::Command};
 
 use codex_administrator::CODEX_PLUS_BOOTSTRAP_KEY;
 use tempfile::tempdir;
@@ -17,6 +17,37 @@ fn top_level_help_exposes_only_current_provider_and_injection_commands() {
     assert!(stdout.contains("doctor"));
     assert!(!stdout.contains("serve"));
     assert!(stdout.contains("Grok model-list injection"));
+}
+
+#[test]
+#[ignore = "requires a registered Codex++ installation outside the default search paths"]
+fn live_registered_custom_codex_plus_install_is_discovered() {
+    let expected = PathBuf::from(
+        env::var_os("CODEX_ADMINISTRATOR_LIVE_CODEX_PLUS_PLUS")
+            .expect("set CODEX_ADMINISTRATOR_LIVE_CODEX_PLUS_PLUS to the installed executable"),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_codex-administrator"))
+        .args(["doctor", "--json"])
+        .env_remove("CODEX_PLUS_PLUS_PATH")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let actual = report["adapters"]["codex_plus_plus"]["path"]
+        .as_str()
+        .map(PathBuf::from);
+    assert_eq!(actual.as_deref(), Some(expected.as_path()));
+    assert_eq!(report["adapters"]["codex_plus_plus"]["found"], true);
+    assert_eq!(report["adapters"]["codex_plus_plus"]["eligible"], false);
+    assert_eq!(
+        report["adapters"]["codex_plus_plus"]["reason"],
+        "unverified_host_identity"
+    );
 }
 
 #[test]

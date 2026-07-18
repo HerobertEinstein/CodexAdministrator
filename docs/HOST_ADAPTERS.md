@@ -104,6 +104,13 @@ native.
 The current manifest contains no hosts, so this branch cannot enable or launch
 Codex++ injection.
 
+`doctor` locates Codex++ through an explicit `CODEX_PLUS_PLUS_PATH`, standard
+installation directories, or the Windows uninstall registration. Discovery is
+not a compatibility decision: the machine-readable report exposes `found`,
+`path`, `eligible`, and `reason` separately. A registered custom-path install
+therefore reports `found=true` while an empty or non-matching compatibility
+manifest still reports `eligible=false` and keeps Codex++ native.
+
 ## Update Behavior
 
 For Codex++, an upstream update changes the executable identity and disables

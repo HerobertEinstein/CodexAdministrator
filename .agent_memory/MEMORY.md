@@ -13,3 +13,4 @@ injection, host adapters, compatibility gates, or update isolation.
 - [Multi-injector composition boundary](decisions/multi-injector-composition-boundary.md)
 - [No standalone Grok runtime](decisions/no-standalone-grok-runtime.md)
 - [GitHub publication freshness gate](decisions/github-publication-freshness-gate.md)
+- [Codex++ custom install discovery](bugs/codex-plus-custom-install-discovery.md)

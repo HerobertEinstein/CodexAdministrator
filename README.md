@@ -85,7 +85,9 @@ release or supported installer deployment.
   checkout; changed assets disable only that payload.
 - Codex++ compatibility remains disabled. The shipped compatibility manifest is
   empty, so an unverified Codex++ build stays native and is not launched by
-  Administrator.
+  Administrator. `doctor` discovers explicit, default, and Windows-registered
+  install locations, but reports discovery and compatibility separately:
+  `found=true` does not imply `eligible=true`.
 
 ## Windows Supervisor
 
@@ -312,6 +314,10 @@ surface, not an available runtime option. Unknown releases remove only a stale
 Administrator-owned script/config key, report `native_fallback`, and are not
 launched by Administrator. Enabling a future identity requires its exact
 executable SHA-256 and matching host/composition E2E in the same publication.
+The Windows doctor probe checks `CODEX_PLUS_PLUS_PATH`, standard installation
+directories, and the publisher's uninstall registration. Its JSON output keeps
+`found`, `path`, `eligible`, and `reason` distinct so a custom installation is
+not mistaken for an eligible host or for an absent application.
 
 ## Compatible Renderer Addons
 
