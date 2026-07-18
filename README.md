@@ -245,6 +245,24 @@ daily conversation inputs are `sessions/**/*.jsonl`,
 `config.toml`, SQLite/WAL/SHM files, logs, goals, memories, hard links,
 junctions, and symbolic links are never copied or shared.
 
+For thread IDs present in both homes, native task synchronization also enables
+metadata-only session continuity. Managed launch merges one project-owned
+`UserPromptSubmit` command into each user `hooks.json`, discovers that exact
+handler through official `hooks/list`, and records its enabled trusted hash only
+through official `config/batchWrite` under `hooks.state`. Other hooks and config
+keys are preserved. The hook fails open when its compact manifest is missing or
+invalid, so continuity state cannot block a user prompt.
+
+An event-driven out-of-band worker observes shared rollout changes and reads the
+latest complete turn plus bounded history through official app-server RPC. It
+stores only provider, turn/item IDs, types, statuses, counts, fingerprints,
+freshness time, the newest exact common turn, and the resulting relation in the
+isolated `session-continuity-manifest.json`; prompts, message bodies, tool output,
+and project paths are excluded. Each prompt receives both lane cursors and the
+observation age as temporary hook context. One lane is the explicit mainline
+writer; concurrent heads are retained as divergence and never resolved by
+last-writer-wins.
+
 Goal intent synchronization is disabled by default. When explicitly enabled,
 it also requires native task synchronization and an accessible official Codex
 CLI installation. The launcher starts short-lived official app-server helpers

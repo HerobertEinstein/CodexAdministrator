@@ -196,6 +196,45 @@ fn direct_child_services_the_model_picker_broker_and_emits_a_structured_restart_
 }
 
 #[test]
+fn direct_child_wires_session_continuity_as_an_out_of_band_lifecycle_worker() {
+    let main = fs::read_to_string(root().join("src/main.rs")).unwrap();
+
+    assert!(main.contains("native_shared_session_rollouts"));
+    assert!(main.contains("recent_native_shared_thread_ids"));
+    assert!(main.contains("NativeSessionContinuityProcessBackend"));
+    assert!(main.contains("NativeSessionContinuityCoordinator"));
+    assert!(main.contains("session_continuity.maintain_once()"));
+    assert!(main.contains("drop(session_continuity.take())"));
+}
+
+#[test]
+fn direct_child_trusts_the_dual_home_continuity_hook_before_starting_observation() {
+    let main = fs::read_to_string(root().join("src/main.rs")).unwrap();
+    let hook_sync = main
+        .find("sync_native_session_continuity_hooks_via_official_app_server")
+        .unwrap();
+    let coordinator = main
+        .find("NativeSessionContinuityCoordinator::new")
+        .unwrap();
+
+    assert!(main.contains("session-continuity-hook"));
+    assert!(hook_sync < coordinator);
+}
+
+#[test]
+fn public_docs_define_the_session_continuity_hook_and_its_daily_write_boundary() {
+    let readme = fs::read_to_string(root().join("README.md")).unwrap();
+    let architecture = fs::read_to_string(root().join("docs/ARCHITECTURE.md")).unwrap();
+    let isolation = fs::read_to_string(root().join("docs/UPDATE_ISOLATION.md")).unwrap();
+    let combined = format!("{readme}\n{architecture}\n{isolation}");
+
+    assert!(combined.contains("UserPromptSubmit"));
+    assert!(combined.contains("hooks.state"));
+    assert!(combined.contains("last-writer-wins"));
+    assert!(combined.contains("message bodies"));
+}
+
+#[test]
 fn product_launcher_does_not_depend_on_ccswitch_or_a_fixed_hebox_profile() {
     let root = root();
     let mut content = Vec::new();

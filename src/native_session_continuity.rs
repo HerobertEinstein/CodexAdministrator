@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::Path,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result, bail};
@@ -24,10 +25,24 @@ pub enum NativeTurnStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeTurnItemCheckpoint {
+    pub id: String,
+    pub item_type: String,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeTurnCheckpoint {
     pub id: String,
     pub fingerprint: String,
     pub status: NativeTurnStatus,
+    #[serde(default)]
+    pub item_count: usize,
+    #[serde(default)]
+    pub items_complete: bool,
+    #[serde(default)]
+    pub last_item: Option<NativeTurnItemCheckpoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +65,19 @@ pub enum NativeSessionRelation {
     Unknown,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeSessionCursor {
+    pub model_provider: String,
+    pub turn_id: Option<String>,
+    pub turn_status: Option<NativeTurnStatus>,
+    pub item_id: Option<String>,
+    pub item_type: Option<String>,
+    pub item_status: Option<String>,
+    pub item_count: usize,
+    pub items_complete: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeSessionContinuity {
@@ -58,6 +86,10 @@ pub struct NativeSessionContinuity {
     pub common_turn_id: Option<String>,
     pub daily_head_id: Option<String>,
     pub isolated_head_id: Option<String>,
+    #[serde(default)]
+    pub daily_cursor: NativeSessionCursor,
+    #[serde(default)]
+    pub isolated_cursor: NativeSessionCursor,
 }
 
 pub trait NativeSessionHeadStore {
@@ -76,17 +108,19 @@ pub struct NativeSessionContinuityReceipt {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct NativeSessionContinuityRecord {
-    daily: NativeSessionHead,
-    isolated: NativeSessionHead,
-    continuity: NativeSessionContinuity,
+pub struct NativeSessionContinuitySnapshot {
+    pub daily: NativeSessionHead,
+    pub isolated: NativeSessionHead,
+    pub continuity: NativeSessionContinuity,
+    #[serde(default)]
+    pub observed_at_unix_ms: u64,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct NativeSessionContinuityManifest {
     version: u8,
-    records: BTreeMap<String, NativeSessionContinuityRecord>,
+    records: BTreeMap<String, NativeSessionContinuitySnapshot>,
 }
 
 pub fn observe_native_session_continuity<D, I, T>(
@@ -125,10 +159,11 @@ where
         }
         manifest.records.insert(
             thread_id.to_owned(),
-            NativeSessionContinuityRecord {
+            NativeSessionContinuitySnapshot {
                 daily: daily_head,
                 isolated: isolated_head,
                 continuity,
+                observed_at_unix_ms: current_unix_ms()?,
             },
         );
     }
@@ -192,7 +227,37 @@ pub fn compare_native_session_heads(
         common_turn_id: common.map(|turn| turn.id.clone()),
         daily_head_id: daily_latest.map(|turn| turn.id.clone()),
         isolated_head_id: isolated_latest.map(|turn| turn.id.clone()),
+        daily_cursor: cursor_for_head(daily),
+        isolated_cursor: cursor_for_head(isolated),
     })
+}
+
+pub fn read_native_session_continuity(
+    manifest_path: &Path,
+    thread_id: &str,
+) -> Result<Option<NativeSessionContinuitySnapshot>> {
+    if thread_id.trim().is_empty() {
+        bail!("session continuity thread id must not be empty");
+    }
+    Ok(load_manifest(manifest_path)?
+        .records
+        .get(thread_id)
+        .cloned())
+}
+
+fn cursor_for_head(head: &NativeSessionHead) -> NativeSessionCursor {
+    let latest = head.turns.first();
+    let last_item = latest.and_then(|turn| turn.last_item.as_ref());
+    NativeSessionCursor {
+        model_provider: head.model_provider.clone(),
+        turn_id: latest.map(|turn| turn.id.clone()),
+        turn_status: latest.map(|turn| turn.status),
+        item_id: last_item.map(|item| item.id.clone()),
+        item_type: last_item.map(|item| item.item_type.clone()),
+        item_status: last_item.and_then(|item| item.status.clone()),
+        item_count: latest.map_or(0, |turn| turn.item_count),
+        items_complete: latest.is_none_or(|turn| turn.items_complete),
+    }
 }
 
 fn exact_turn(left: &NativeTurnCheckpoint, right: &NativeTurnCheckpoint) -> bool {
@@ -214,8 +279,31 @@ fn validate_head(head: &NativeSessionHead) -> Result<()> {
         if !ids.insert(turn.id.as_str()) {
             bail!("session head contains a duplicate turn id");
         }
+        if turn.item_count == 0 && turn.last_item.is_some() {
+            bail!("session turn cannot have a last item with a zero item count");
+        }
+        if turn.item_count > 0 && turn.last_item.is_none() {
+            bail!("session turn with items must identify its last item");
+        }
+        if let Some(item) = &turn.last_item {
+            if item.id.trim().is_empty() || item.item_type.trim().is_empty() {
+                bail!("session turn item checkpoint fields must not be empty");
+            }
+            if item.status.as_deref().is_some_and(str::is_empty) {
+                bail!("session turn item status must not be empty");
+            }
+        }
     }
     Ok(())
+}
+
+fn current_unix_ms() -> Result<u64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system time predates the Unix epoch")?
+        .as_millis()
+        .try_into()
+        .context("system time exceeds the continuity timestamp range")
 }
 
 fn load_manifest(path: &Path) -> Result<NativeSessionContinuityManifest> {

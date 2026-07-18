@@ -235,6 +235,26 @@ allowlist is exactly `sessions/**/*.jsonl`, `archived_sessions/**/*.jsonl`, and
 `session_index.jsonl`. It never reads or copies daily `config.toml`, SQLite,
 WAL, SHM, logs, goals, memories, junctions, symbolic links, or hard links.
 
+Shared thread IDs also enter a metadata-only continuity plane. Managed launch
+merges one project-owned `UserPromptSubmit` command into each user
+`hooks.json`, resolves the exact handler with official `hooks/list`, and writes
+only its enabled trusted hash under `hooks.state` through official
+`config/batchWrite`. The merge preserves every unrelated root field, event,
+group, handler, and config key. Hook execution is fail-open when the compact
+manifest cannot be read.
+
+The directory monitor debounces changes and dispatches a killable worker outside
+the 500 ms desktop loop. Initial observation reads the latest full turn and a
+bounded summary history from both official app servers in parallel. Later
+observations read only each latest full turn and merge it with the prior verified
+metadata history. `session-continuity-manifest.json` contains no prompts,
+message bodies, tool output, or project paths. It records both exact turn/item
+cursors, item completeness, observation age, newest exact common turn, and
+`equal`, `dailyAhead`, `isolatedAhead`, `diverged`, or `unknown`. Prompt hooks
+add that machine metadata temporarily; they do not inject permanent history.
+The coordination rule is a single-writer mainline with both heads retained on
+divergence, never last-writer-wins.
+
 Goal intent synchronization is disabled by default and cannot be enabled
 without task synchronization. When enabled, a separately installed official
 Codex CLI starts short-lived stdio app-server processes against the daily and
@@ -269,9 +289,12 @@ an interrupted manifest write, keeps one active-or-archived private copy per
 thread, and gives any locally changed isolated rollout precedence. The private
 `session_index.jsonl` uses official last-entry semantics and preserves a newer
 isolated name. No imported state is written back to the daily `CODEX_HOME`.
-The optional Goal bridge is the sole exception to daily-state read-only policy:
-it may update only the official thread Goal intent through app-server RPC after
-the user opts in; it never writes daily files directly.
+The session-continuity hook and optional Goal bridge are the only exceptions to
+daily-state read-only policy. Continuity may merge its exact handler into daily
+`hooks.json` and let official config RPC maintain only the matching
+`hooks.state` trust record. Goal synchronization may update only the official
+thread Goal intent through app-server RPC after the user opts in. Neither path
+copies or rewrites daily rollout, SQLite, WAL, or SHM state.
 
 Persistent shutdown still terminates the Job Object, tracks escaped
 descendants to quiescence, and closes the loopback listener before releasing

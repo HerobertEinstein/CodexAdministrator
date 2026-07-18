@@ -3,8 +3,9 @@ use std::{collections::BTreeMap, env, fs, path::PathBuf};
 use anyhow::Result;
 use codex_administrator::{
     NativeSessionHead, NativeSessionHeadStore, NativeSessionRelation, NativeTurnCheckpoint,
-    NativeTurnStatus, compare_native_session_heads, observe_native_session_continuity,
-    observe_native_session_continuity_via_official_app_server,
+    NativeTurnItemCheckpoint, NativeTurnStatus, compare_native_session_heads,
+    observe_native_session_continuity, observe_native_session_continuity_via_official_app_server,
+    read_native_session_continuity,
 };
 use tempfile::tempdir;
 
@@ -13,6 +14,17 @@ fn turn(id: &str, fingerprint: &str, status: NativeTurnStatus) -> NativeTurnChec
         id: id.to_owned(),
         fingerprint: fingerprint.to_owned(),
         status,
+        item_count: 0,
+        items_complete: true,
+        last_item: None,
+    }
+}
+
+fn item(id: &str, item_type: &str, status: Option<&str>) -> NativeTurnItemCheckpoint {
+    NativeTurnItemCheckpoint {
+        id: id.to_owned(),
+        item_type: item_type.to_owned(),
+        status: status.map(str::to_owned),
     }
 }
 
@@ -115,6 +127,64 @@ fn the_live_partial_copy_scenario_is_divergence_not_daily_ahead() {
 }
 
 #[test]
+fn continuity_exposes_each_lane_exact_turn_and_last_item_cursor() {
+    let mut daily_turn = turn("turn-daily", "sha-daily", NativeTurnStatus::InProgress);
+    daily_turn.item_count = 3;
+    daily_turn.last_item = Some(item(
+        "item-daily-command",
+        "commandExecution",
+        Some("inProgress"),
+    ));
+    let mut isolated_turn = turn(
+        "turn-isolated",
+        "sha-isolated",
+        NativeTurnStatus::Interrupted,
+    );
+    isolated_turn.item_count = 2;
+    isolated_turn.last_item = Some(item("item-isolated-agent", "agentMessage", None));
+    let daily = head(vec![
+        daily_turn,
+        turn("turn-common", "sha-common", NativeTurnStatus::Completed),
+    ]);
+    let isolated = head(vec![
+        isolated_turn,
+        turn("turn-common", "sha-common", NativeTurnStatus::Completed),
+    ]);
+
+    let continuity = compare_native_session_heads(&daily, &isolated).unwrap();
+
+    assert_eq!(continuity.relation, NativeSessionRelation::Diverged);
+    assert_eq!(
+        continuity.daily_cursor.turn_id.as_deref(),
+        Some("turn-daily")
+    );
+    assert_eq!(
+        continuity.daily_cursor.turn_status,
+        Some(NativeTurnStatus::InProgress)
+    );
+    assert_eq!(
+        continuity.daily_cursor.item_id.as_deref(),
+        Some("item-daily-command")
+    );
+    assert_eq!(
+        continuity.daily_cursor.item_type.as_deref(),
+        Some("commandExecution")
+    );
+    assert_eq!(
+        continuity.daily_cursor.item_status.as_deref(),
+        Some("inProgress")
+    );
+    assert_eq!(
+        continuity.isolated_cursor.turn_status,
+        Some(NativeTurnStatus::Interrupted)
+    );
+    assert_eq!(
+        continuity.isolated_cursor.item_id.as_deref(),
+        Some("item-isolated-agent")
+    );
+}
+
+#[test]
 fn different_thread_ids_are_rejected_instead_of_being_compared() {
     let daily = head(vec![]);
     let mut isolated = head(vec![]);
@@ -189,12 +259,21 @@ fn continuity_observation_persists_both_heads_and_the_exact_common_turn() {
 
     assert_eq!(receipt.threads, 1);
     assert_eq!(receipt.diverged, 1);
-    let saved: serde_json::Value = serde_json::from_slice(&fs::read(manifest).unwrap()).unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
     let record = &saved["records"][thread_id];
     assert_eq!(record["daily"]["turns"][0]["id"], "turn-daily");
     assert_eq!(record["isolated"]["turns"][0]["id"], "turn-isolated");
     assert_eq!(record["continuity"]["relation"], "diverged");
     assert_eq!(record["continuity"]["commonTurnId"], "turn-common");
+
+    let snapshot = read_native_session_continuity(&manifest, thread_id)
+        .unwrap()
+        .expect("the observed thread should be readable by either lane");
+    assert_eq!(
+        snapshot.continuity.common_turn_id.as_deref(),
+        Some("turn-common")
+    );
+    assert!(snapshot.observed_at_unix_ms > 0);
 }
 
 #[test]

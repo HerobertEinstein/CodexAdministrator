@@ -34,11 +34,32 @@ pub fn install_grok_native_model_catalog(
     }
 
     let mut catalog = extract_official_model_catalog(official_codex_binary)?;
+    normalize_official_model_catalog(&mut catalog)?;
     append_grok_models(&mut catalog, injected_models)?;
     let rendered = serde_json::to_vec_pretty(&catalog)
         .context("failed to serialize the Grok native model catalog")?;
     install_if_changed(catalog_path, &rendered)?;
     install_catalog_reference(config_path, catalog_path)?;
+    Ok(())
+}
+
+fn normalize_official_model_catalog(catalog: &mut Value) -> Result<()> {
+    let models = catalog
+        .get_mut("models")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| anyhow::anyhow!("bundled official model catalog has no models array"))?;
+    for model in models {
+        let model = model.as_object_mut().ok_or_else(|| {
+            anyhow::anyhow!("bundled official model catalog entry is not an object")
+        })?;
+        if !model.contains_key("supports_reasoning_summaries") {
+            let supports = model
+                .get("default_reasoning_summary")
+                .and_then(Value::as_str)
+                .is_some_and(|summary| !summary.eq_ignore_ascii_case("none"));
+            model.insert("supports_reasoning_summaries".into(), json!(supports));
+        }
+    }
     Ok(())
 }
 
@@ -231,6 +252,7 @@ fn append_grok_models(
         .ok_or_else(|| anyhow::anyhow!("bundled official model catalog has no models array"))?;
     let template = models
         .first()
+        .cloned()
         .ok_or_else(|| anyhow::anyhow!("bundled official model catalog is empty"))?;
     let official_instructions = template
         .get("base_instructions")
@@ -269,47 +291,70 @@ fn append_grok_models(
             format!("{grok_identity}\n\n{official_instructions}")
         };
         let priority = i64::try_from(initial_model_count + index).unwrap_or(i64::MAX);
-        models.push(json!({
-            "slug": descriptor.model,
-            "display_name": descriptor.display_name,
-            "description": descriptor.description,
-            "default_reasoning_level": descriptor.default_reasoning_effort,
-            "supported_reasoning_levels": supported_reasoning_levels,
-            "shell_type": "shell_command",
-            "visibility": "none",
-            "supported_in_api": true,
-            "priority": priority,
-            "additional_speed_tiers": [],
-            "service_tiers": [],
-            "default_service_tier": null,
-            "availability_nux": {
-                "message": "codex-administrator:grok-native-catalog-v1"
-            },
-            "upgrade": null,
-            "base_instructions": base_instructions,
-            "model_messages": null,
-            "include_skills_usage_instructions": false,
-            "default_reasoning_summary": "none",
-            "support_verbosity": false,
-            "default_verbosity": null,
-            "apply_patch_tool_type": null,
-            "web_search_tool_type": "text",
-            "truncation_policy": {"mode": "bytes", "limit": 10000},
-            "supports_parallel_tool_calls": false,
-            "supports_image_detail_original": false,
-            "context_window": CONSERVATIVE_CLIENT_CONTEXT_WINDOW,
-            "max_context_window": CONSERVATIVE_CLIENT_CONTEXT_WINDOW,
-            "auto_compact_token_limit": null,
-            "comp_hash": null,
-            "effective_context_window_percent": 95,
-            "experimental_supported_tools": [],
-            "input_modalities": descriptor.input_modalities,
-            "supports_search_tool": false,
-            "use_responses_lite": false,
-            "auto_review_model_override": null,
-            "tool_mode": null,
-            "multi_agent_version": null
-        }));
+        let mut model = template.clone();
+        let model = model.as_object_mut().ok_or_else(|| {
+            anyhow::anyhow!("official default model catalog entry is not an object")
+        })?;
+        model.insert("slug".into(), json!(descriptor.model));
+        model.insert("display_name".into(), json!(descriptor.display_name));
+        model.insert("description".into(), json!(descriptor.description));
+        model.insert(
+            "default_reasoning_level".into(),
+            json!(descriptor.default_reasoning_effort),
+        );
+        model.insert(
+            "supported_reasoning_levels".into(),
+            json!(supported_reasoning_levels),
+        );
+        model.insert("shell_type".into(), json!("shell_command"));
+        model.insert("visibility".into(), json!("none"));
+        model.insert("supported_in_api".into(), json!(true));
+        model.insert("priority".into(), json!(priority));
+        model.insert("additional_speed_tiers".into(), json!([]));
+        model.insert("service_tiers".into(), json!([]));
+        model.insert("default_service_tier".into(), Value::Null);
+        model.insert(
+            "availability_nux".into(),
+            json!({"message": "codex-administrator:grok-native-catalog-v1"}),
+        );
+        model.insert("upgrade".into(), Value::Null);
+        model.insert("base_instructions".into(), json!(base_instructions));
+        model.insert("model_messages".into(), Value::Null);
+        model.insert("include_skills_usage_instructions".into(), json!(false));
+        model.insert("supports_reasoning_summaries".into(), json!(false));
+        model.insert("default_reasoning_summary".into(), json!("none"));
+        model.insert("support_verbosity".into(), json!(false));
+        model.insert("default_verbosity".into(), Value::Null);
+        model.insert("apply_patch_tool_type".into(), Value::Null);
+        model.insert("web_search_tool_type".into(), json!("text"));
+        model.insert(
+            "truncation_policy".into(),
+            json!({"mode": "bytes", "limit": 10000}),
+        );
+        model.insert("supports_parallel_tool_calls".into(), json!(false));
+        model.insert("supports_image_detail_original".into(), json!(false));
+        model.insert(
+            "context_window".into(),
+            json!(CONSERVATIVE_CLIENT_CONTEXT_WINDOW),
+        );
+        model.insert(
+            "max_context_window".into(),
+            json!(CONSERVATIVE_CLIENT_CONTEXT_WINDOW),
+        );
+        model.insert("auto_compact_token_limit".into(), Value::Null);
+        model.insert("comp_hash".into(), Value::Null);
+        model.insert("effective_context_window_percent".into(), json!(95));
+        model.insert("experimental_supported_tools".into(), json!([]));
+        model.insert(
+            "input_modalities".into(),
+            json!(descriptor.input_modalities),
+        );
+        model.insert("supports_search_tool".into(), json!(false));
+        model.insert("use_responses_lite".into(), json!(false));
+        model.insert("auto_review_model_override".into(), Value::Null);
+        model.insert("tool_mode".into(), Value::Null);
+        model.insert("multi_agent_version".into(), Value::Null);
+        models.push(Value::Object(model.clone()));
     }
     Ok(())
 }

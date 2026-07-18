@@ -17,8 +17,11 @@ mod native_goal_sync;
 mod native_model_catalog;
 mod native_provider;
 mod native_session_continuity;
+mod native_session_hook;
 #[cfg(windows)]
 mod native_session_watch;
+#[cfg(windows)]
+mod native_session_worker;
 #[cfg(windows)]
 mod native_skill_sync;
 #[cfg(windows)]
@@ -72,8 +75,9 @@ pub use model_discovery::{
 #[cfg(windows)]
 pub use native_goal_sync::{
     NativeGoalIntent, NativeGoalStatus, NativeGoalStore, NativeGoalSyncReceipt,
-    observe_native_session_continuity_via_official_app_server, sync_native_goal_intents,
-    sync_native_goal_intents_via_official_app_server,
+    NativeSessionHookSyncReceipt, observe_native_session_continuity_via_official_app_server,
+    sync_native_goal_intents, sync_native_goal_intents_via_official_app_server,
+    sync_native_session_continuity_hooks_via_official_app_server,
 };
 pub use native_model_catalog::{
     install_grok_native_model_catalog, remove_grok_native_model_catalog,
@@ -83,18 +87,30 @@ pub use native_provider::{
     install_grok_native_provider, remove_grok_native_provider,
 };
 pub use native_session_continuity::{
-    NativeSessionContinuity, NativeSessionContinuityReceipt, NativeSessionHead,
-    NativeSessionHeadStore, NativeSessionRelation, NativeTurnCheckpoint, NativeTurnStatus,
-    compare_native_session_heads, observe_native_session_continuity,
+    NativeSessionContinuity, NativeSessionContinuityReceipt, NativeSessionContinuitySnapshot,
+    NativeSessionCursor, NativeSessionHead, NativeSessionHeadStore, NativeSessionRelation,
+    NativeTurnCheckpoint, NativeTurnItemCheckpoint, NativeTurnStatus, compare_native_session_heads,
+    observe_native_session_continuity, read_native_session_continuity,
+};
+pub use native_session_hook::{
+    NativeSessionHookInstallReceipt, NativeSessionLane,
+    install_native_session_continuity_hook_file, native_session_continuity_hook_response,
 };
 #[cfg(windows)]
 pub use native_session_watch::NativeSessionChangeMonitor;
+#[cfg(windows)]
+pub use native_session_worker::{
+    NativeSessionContinuityCoordinator, NativeSessionContinuityMaintenance,
+    NativeSessionContinuityProcessBackend, NativeSessionContinuityWorker,
+    NativeSessionContinuityWorkerBackend, NativeSessionContinuityWorkerFinished,
+    NativeSessionContinuityWorkerOutcome, run_native_session_continuity_worker,
+};
 #[cfg(windows)]
 pub use native_skill_sync::{NativeSkillSyncReceipt, sync_native_skills};
 #[cfg(windows)]
 pub use native_state_sync::{
     NativeSessionSyncReceipt, NativeSharedSessionRollout, install_isolated_sqlite_home,
-    native_shared_session_rollouts, sync_native_session_snapshots,
+    native_shared_session_rollouts, recent_native_shared_thread_ids, sync_native_session_snapshots,
 };
 pub use renderer_addons::{
     RendererAddonBundle, RendererAddonCatalogEntry, RendererAddonPolicy, RendererAddonReport,

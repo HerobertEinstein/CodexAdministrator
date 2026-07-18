@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeSet,
-    env,
-    io::{self, Write},
+    env, fs,
+    io::{self, Read, Write},
     net::TcpListener,
     path::PathBuf,
     sync::{
@@ -13,17 +13,22 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use codex_administrator::{
     BootstrapConfig, CompatibilityDecision, CompatibilityManifest, CompatibilityPolicy,
     DEFAULT_GROK_ACTION_PATH, DEFAULT_GROK_BASE_URL, DirectInstance, DirectInstanceLayout,
     DiscoveredModel, GrokControlBroker, GrokNativeProviderConfig, HostAdapterKind, HostIdentity,
-    InjectedModelDescriptor, LauncherSettings, ModelPickerConfig, PROVIDER_CREDENTIAL_TARGET,
-    RendererAddonPolicy, RendererAddonReport, RendererAddonSettings, SupervisorMode,
-    WindowsCredentialStore, WindowsDirectRuntime, codex_plus_launch_allowed, fetch_model_list,
-    find_official_chatgpt_executable, install_grok_native_provider, launch_host_executable,
-    launcher_settings_path, prepare_codex_plus_host_script_guarded, prepare_renderer_addons,
-    remove_codex_plus_bootstrap, render_bootstrap, resolve_launcher_control_settings,
+    InjectedModelDescriptor, LauncherSettings, ModelPickerConfig, NativeSessionChangeMonitor,
+    NativeSessionContinuityCoordinator, NativeSessionContinuityProcessBackend, NativeSessionLane,
+    PROVIDER_CREDENTIAL_TARGET, RendererAddonPolicy, RendererAddonReport, RendererAddonSettings,
+    SupervisorMode, WindowsCredentialStore, WindowsDirectRuntime, codex_plus_launch_allowed,
+    fetch_model_list, find_official_chatgpt_executable, install_grok_native_provider,
+    launch_host_executable, launcher_instance_root, launcher_settings_path,
+    native_session_continuity_hook_response, native_shared_session_rollouts,
+    prepare_codex_plus_host_script_guarded, prepare_renderer_addons,
+    recent_native_shared_thread_ids, remove_codex_plus_bootstrap, render_bootstrap,
+    resolve_launcher_control_settings, run_native_session_continuity_worker,
+    sync_native_session_continuity_hooks_via_official_app_server,
     validate_launchable_official_chatgpt_executable, validate_official_chatgpt_executable,
 };
 use directories::BaseDirs;
@@ -45,6 +50,10 @@ enum Command {
     ConfigureProvider(ConfigureProviderArgs),
     Inject(Box<InjectArgs>),
     Doctor(DoctorArgs),
+    #[command(hide = true)]
+    SessionContinuityWorker(SessionContinuityWorkerArgs),
+    #[command(hide = true)]
+    SessionContinuityHook(SessionContinuityHookArgs),
 }
 
 #[derive(Debug, Args)]
@@ -143,12 +152,120 @@ struct DoctorArgs {
     json: bool,
 }
 
+#[derive(Debug, Args)]
+struct SessionContinuityWorkerArgs {
+    #[arg(long)]
+    daily_codex_home: PathBuf,
+
+    #[arg(long)]
+    isolated_codex_home: PathBuf,
+
+    #[arg(long)]
+    request: PathBuf,
+
+    #[arg(long)]
+    manifest: PathBuf,
+
+    #[arg(long, hide = true)]
+    parent_gated: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SessionContinuityLaneArg {
+    Daily,
+    Isolated,
+}
+
+impl From<SessionContinuityLaneArg> for NativeSessionLane {
+    fn from(value: SessionContinuityLaneArg) -> Self {
+        match value {
+            SessionContinuityLaneArg::Daily => Self::Daily,
+            SessionContinuityLaneArg::Isolated => Self::Isolated,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct SessionContinuityHookArgs {
+    #[arg(long, value_enum, hide = true)]
+    lane: Option<SessionContinuityLaneArg>,
+
+    #[arg(long, hide = true)]
+    manifest: Option<PathBuf>,
+}
+
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::ConfigureProvider(args) => configure_provider(args),
         Command::Inject(args) => inject(*args),
         Command::Doctor(args) => doctor(args),
+        Command::SessionContinuityWorker(args) => session_continuity_worker(args),
+        Command::SessionContinuityHook(args) => session_continuity_hook(args),
     }
+}
+
+fn session_continuity_worker(args: SessionContinuityWorkerArgs) -> Result<()> {
+    if args.parent_gated {
+        let mut gate = [0_u8; 1];
+        io::stdin()
+            .read_exact(&mut gate)
+            .context("continuity worker parent gate closed before release")?;
+    }
+    let receipt = run_native_session_continuity_worker(
+        &args.daily_codex_home,
+        &args.isolated_codex_home,
+        &args.request,
+        &args.manifest,
+    )?;
+    println!(
+        "{}",
+        serde_json::to_string(&serde_json::json!({
+            "status": "session_continuity_observed",
+            "threads": receipt.threads,
+            "equal": receipt.equal,
+            "daily_ahead": receipt.daily_ahead,
+            "isolated_ahead": receipt.isolated_ahead,
+            "diverged": receipt.diverged,
+            "unknown": receipt.unknown,
+        }))?
+    );
+    Ok(())
+}
+
+fn session_continuity_hook(args: SessionContinuityHookArgs) -> Result<()> {
+    const MAX_HOOK_INPUT_BYTES: u64 = 64 * 1024;
+    let isolated_codex_home = launcher_instance_root()?.join("codex-home");
+    let manifest = args
+        .manifest
+        .unwrap_or_else(|| isolated_codex_home.join("session-continuity-manifest.json"));
+    let lane = match args.lane {
+        Some(lane) => lane.into(),
+        None => {
+            let current = env::var_os("CODEX_HOME")
+                .map(PathBuf::from)
+                .and_then(|path| fs::canonicalize(path).ok());
+            let isolated = fs::canonicalize(&isolated_codex_home).ok();
+            if current.is_some() && current == isolated {
+                NativeSessionLane::Isolated
+            } else {
+                NativeSessionLane::Daily
+            }
+        }
+    };
+    let mut input = Vec::new();
+    io::stdin()
+        .take(MAX_HOOK_INPUT_BYTES + 1)
+        .read_to_end(&mut input)?;
+    if input.len() as u64 > MAX_HOOK_INPUT_BYTES {
+        bail!("session continuity hook input exceeds its size limit");
+    }
+    println!(
+        "{}",
+        serde_json::to_string(&native_session_continuity_hook_response(
+            &manifest, lane, &input,
+        )?)?
+    );
+    Ok(())
 }
 
 fn configure_provider(args: ConfigureProviderArgs) -> Result<()> {
@@ -403,6 +520,58 @@ fn inject_direct(
         instance.shutdown()?;
         bail!("direct startup was interrupted");
     }
+    let mut session_continuity = if args.sync_native_sessions {
+        let daily_codex_home = layout.contract().daily_codex_home().to_path_buf();
+        let isolated_codex_home = layout.contract().isolated_codex_home().to_path_buf();
+        let continuity_executable =
+            env::current_exe().context("failed to resolve continuity helper executable")?;
+        let continuity_manifest = isolated_codex_home.join("session-continuity-manifest.json");
+        let executable_text = continuity_executable.to_string_lossy();
+        let manifest_text = continuity_manifest.to_string_lossy();
+        if executable_text.contains('"')
+            || manifest_text.contains('"')
+            || executable_text.chars().any(char::is_control)
+            || manifest_text.chars().any(char::is_control)
+        {
+            bail!("session continuity helper paths cannot be represented safely as a hook command");
+        }
+        let hook_command =
+            format!("\"{executable_text}\" session-continuity-hook --manifest \"{manifest_text}\"");
+        sync_native_session_continuity_hooks_via_official_app_server(
+            &daily_codex_home,
+            &isolated_codex_home,
+            &hook_command,
+        )?
+        .ok_or_else(|| {
+            anyhow::anyhow!("official Codex app-server is unavailable for continuity hook trust")
+        })?;
+        let rollouts = native_shared_session_rollouts(&daily_codex_home, &isolated_codex_home)?;
+        if rollouts.is_empty() {
+            None
+        } else {
+            let seed_threads = recent_native_shared_thread_ids(&rollouts, 8)?;
+            let monitor = NativeSessionChangeMonitor::new(
+                &daily_codex_home,
+                &isolated_codex_home,
+                rollouts,
+                Duration::from_millis(750),
+            )?;
+            let backend = NativeSessionContinuityProcessBackend::new(
+                continuity_executable,
+                daily_codex_home,
+                isolated_codex_home.clone(),
+                isolated_codex_home.join("session-continuity-worker-request.json"),
+                continuity_manifest,
+            )?;
+            let mut coordinator =
+                NativeSessionContinuityCoordinator::new(monitor, Box::new(backend));
+            coordinator.enqueue_threads(seed_threads)?;
+            coordinator.maintain_once()?;
+            Some(coordinator)
+        }
+    } else {
+        None
+    };
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
@@ -432,6 +601,31 @@ fn inject_direct(
         if instance.maintain_once()? == codex_administrator::DirectMaintenance::Exited {
             break;
         }
+        let disable_session_continuity =
+            if let Some(session_continuity) = session_continuity.as_mut() {
+                match session_continuity.maintain_once() {
+                    Ok(receipt) => {
+                        if let Some(finished) = receipt.finished
+                            && !finished.outcome.success
+                        {
+                            eprintln!(
+                                "session continuity worker failed: {}",
+                                finished.outcome.diagnostic
+                            );
+                        }
+                        false
+                    }
+                    Err(error) => {
+                        eprintln!("session continuity monitor disabled: {error}");
+                        true
+                    }
+                }
+            } else {
+                false
+            };
+        if disable_session_continuity {
+            session_continuity = None;
+        }
         for request in instance.drain_control_requests(&control_nonce)? {
             let outcome = control_broker.handle(request, &credential_store, fetch_model_list);
             let request_restart = outcome.restart_required;
@@ -454,6 +648,7 @@ fn inject_direct(
             break;
         }
     }
+    drop(session_continuity.take());
     instance.shutdown()?;
     Ok(())
 }

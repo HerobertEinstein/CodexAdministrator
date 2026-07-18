@@ -180,6 +180,43 @@ pub fn native_shared_session_rollouts(
     Ok(rollouts)
 }
 
+pub fn recent_native_shared_thread_ids(
+    rollouts: &[NativeSharedSessionRollout],
+    limit: usize,
+) -> Result<Vec<String>> {
+    if limit == 0 || limit > 64 {
+        bail!("native session continuity seed limit must be between 1 and 64");
+    }
+    let mut activity = BTreeMap::new();
+    for rollout in rollouts {
+        validate_thread_id(&rollout.thread_id)?;
+        let mut latest = None;
+        for path in [&rollout.daily_path, &rollout.isolated_path] {
+            let metadata = fs::symlink_metadata(path).with_context(|| {
+                format!(
+                    "failed to inspect shared session rollout {}",
+                    path.display()
+                )
+            })?;
+            if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            {
+                bail!("shared session rollout has an invalid file shape");
+            }
+            let modified = metadata.modified()?;
+            latest = Some(latest.map_or(modified, |current| std::cmp::max(current, modified)));
+        }
+        let latest = latest.ok_or_else(|| anyhow::anyhow!("shared session rollout has no lane"))?;
+        activity
+            .entry(rollout.thread_id.clone())
+            .and_modify(|current| *current = std::cmp::max(*current, latest))
+            .or_insert(latest);
+    }
+    let mut recent = activity.into_iter().collect::<Vec<_>>();
+    recent.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    recent.truncate(limit);
+    Ok(recent.into_iter().map(|(thread_id, _)| thread_id).collect())
+}
+
 pub fn sync_native_session_snapshots(
     daily_codex_home: &Path,
     isolated_codex_home: &Path,

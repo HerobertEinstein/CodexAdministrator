@@ -8,9 +8,9 @@ use std::{
 
 use codex_administrator::{
     NativeSharedSessionRollout, install_isolated_sqlite_home, native_shared_session_rollouts,
-    sync_native_session_snapshots,
+    recent_native_shared_thread_ids, sync_native_session_snapshots,
 };
-use filetime::FileTime;
+use filetime::{FileTime, set_file_mtime};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
@@ -104,6 +104,36 @@ fn stable_daily_rollouts_are_atomically_imported_without_copying_sqlite() {
 
     let second = sync_native_session_snapshots(&daily, &isolated, "grok_native").unwrap();
     assert_eq!(second.unchanged, 1);
+}
+
+#[test]
+fn continuity_seed_prefers_the_most_recent_activity_from_either_lane() {
+    let temp = tempdir().unwrap();
+    let mut rollouts = Vec::new();
+    for (suffix, daily_time, isolated_time) in [(1, 100, 100), (2, 300, 50), (3, 200, 400)] {
+        let thread_id = format!("019f0000-0000-7000-8000-{suffix:012}");
+        let daily = temp.path().join(format!("daily-{suffix}.jsonl"));
+        let isolated = temp.path().join(format!("isolated-{suffix}.jsonl"));
+        fs::write(&daily, "daily\n").unwrap();
+        fs::write(&isolated, "isolated\n").unwrap();
+        set_file_mtime(&daily, FileTime::from_unix_time(daily_time, 0)).unwrap();
+        set_file_mtime(&isolated, FileTime::from_unix_time(isolated_time, 0)).unwrap();
+        rollouts.push(NativeSharedSessionRollout {
+            thread_id,
+            daily_path: daily,
+            isolated_path: isolated,
+        });
+    }
+
+    let recent = recent_native_shared_thread_ids(&rollouts, 2).unwrap();
+
+    assert_eq!(
+        recent,
+        vec![
+            "019f0000-0000-7000-8000-000000000003",
+            "019f0000-0000-7000-8000-000000000002"
+        ]
+    );
 }
 
 #[test]

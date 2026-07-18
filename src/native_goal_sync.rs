@@ -17,9 +17,11 @@ use sha2::{Digest, Sha256};
 use std::os::windows::process::CommandExt;
 
 use crate::{
-    NativeSessionContinuityReceipt, NativeSessionHead, NativeSessionHeadStore,
-    NativeTurnCheckpoint, NativeTurnStatus, environment_variable_is_sensitive,
-    install_bootstrap_atomically, observe_native_session_continuity,
+    NativeSessionContinuityReceipt, NativeSessionContinuitySnapshot, NativeSessionHead,
+    NativeSessionHeadStore, NativeTurnCheckpoint, NativeTurnItemCheckpoint, NativeTurnStatus,
+    environment_variable_is_sensitive, install_bootstrap_atomically,
+    install_native_session_continuity_hook_file, observe_native_session_continuity,
+    read_native_session_continuity,
 };
 
 const MANIFEST_VERSION: u8 = 1;
@@ -29,8 +31,9 @@ const MAX_OBJECTIVE_BYTES: usize = 1024 * 1024;
 const MAX_SHARED_THREADS: usize = 4096;
 const MAX_CONTINUITY_HEAD_TURNS: usize = 64;
 const CONTINUITY_TURN_PAGE_SIZE: usize = 64;
+const MAX_CONTINUITY_HEAD_ITEMS: usize = 8192;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-const APP_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+const APP_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -397,6 +400,28 @@ struct SpawnedGoalStore {
     child: Child,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SessionContinuityHookMetadata {
+    key: String,
+    current_hash: String,
+    trust_status: String,
+    enabled: bool,
+}
+
+#[derive(Debug, Default)]
+struct CollectedSessionHeadStore {
+    heads: BTreeMap<String, NativeSessionHead>,
+}
+
+impl NativeSessionHeadStore for CollectedSessionHeadStore {
+    fn read_session_head(&mut self, thread_id: &str) -> Result<NativeSessionHead> {
+        self.heads
+            .get(thread_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("collected session head is unavailable"))
+    }
+}
+
 impl NativeGoalStore for SpawnedGoalStore {
     fn get_goal(&mut self, thread_id: &str) -> Result<Option<NativeGoalIntent>> {
         self.server_mut()?.get_goal(thread_id)
@@ -413,6 +438,16 @@ impl NativeGoalStore for SpawnedGoalStore {
 
 impl NativeSessionHeadStore for SpawnedGoalStore {
     fn read_session_head(&mut self, thread_id: &str) -> Result<NativeSessionHead> {
+        self.read_session_head_with_history(thread_id, true)
+    }
+}
+
+impl SpawnedGoalStore {
+    fn read_session_head_with_history(
+        &mut self,
+        thread_id: &str,
+        include_history: bool,
+    ) -> Result<NativeSessionHead> {
         let thread = self
             .server_mut()?
             .request(
@@ -432,17 +467,23 @@ impl NativeSessionHeadStore for SpawnedGoalStore {
             .ok_or_else(|| anyhow::anyhow!("official thread/read omitted model provider"))?
             .to_owned();
 
-        let mut turns = Vec::new();
+        let mut raw_turns = Vec::new();
         let mut cursor = None::<String>;
+        let mut first_page = true;
         let history_complete = loop {
+            let limit = if first_page {
+                1
+            } else {
+                CONTINUITY_TURN_PAGE_SIZE.min(MAX_CONTINUITY_HEAD_TURNS - raw_turns.len())
+            };
             let result = self.server_mut()?.request(
                 "thread/turns/list",
                 json!({
                     "threadId": thread_id,
                     "cursor": cursor,
-                    "limit": CONTINUITY_TURN_PAGE_SIZE,
+                    "limit": limit,
                     "sortDirection": "desc",
-                    "itemsView": "summary"
+                    "itemsView": if first_page { "full" } else { "summary" }
                 }),
             )?;
             let data = result
@@ -450,11 +491,12 @@ impl NativeSessionHeadStore for SpawnedGoalStore {
                 .and_then(Value::as_array)
                 .ok_or_else(|| anyhow::anyhow!("official thread/turns/list omitted data"))?;
             for turn in data {
-                turns.push(turn_checkpoint(turn)?);
-                if turns.len() >= MAX_CONTINUITY_HEAD_TURNS {
+                raw_turns.push(turn.clone());
+                if raw_turns.len() >= MAX_CONTINUITY_HEAD_TURNS {
                     break;
                 }
             }
+            first_page = false;
             cursor = result
                 .get("nextCursor")
                 .and_then(Value::as_str)
@@ -462,10 +504,18 @@ impl NativeSessionHeadStore for SpawnedGoalStore {
             if cursor.is_none() {
                 break true;
             }
-            if turns.len() >= MAX_CONTINUITY_HEAD_TURNS {
+            if !include_history {
+                break false;
+            }
+            if raw_turns.len() >= MAX_CONTINUITY_HEAD_TURNS {
                 break false;
             }
         };
+        let turns = raw_turns
+            .iter()
+            .enumerate()
+            .map(|(index, turn)| turn_checkpoint(turn, index == 0))
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(NativeSessionHead {
             thread_id: thread_id.to_owned(),
@@ -474,15 +524,134 @@ impl NativeSessionHeadStore for SpawnedGoalStore {
             history_complete,
         })
     }
-}
 
-impl SpawnedGoalStore {
     fn server_mut(
         &mut self,
     ) -> Result<&mut JsonLineAppServer<BufReader<ChildStdout>, BufWriter<ChildStdin>>> {
         self.server
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("official app-server helper is already closed"))
+    }
+
+    fn session_continuity_hook_metadata(
+        &mut self,
+        codex_home: &Path,
+        hook_path: &Path,
+        command: &str,
+    ) -> Result<SessionContinuityHookMetadata> {
+        let result = self.server_mut()?.request(
+            "hooks/list",
+            json!({"cwds": [codex_home.to_string_lossy()]}),
+        )?;
+        let entries = result
+            .get("data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| anyhow::anyhow!("official hooks/list response omitted data"))?;
+        let expected_source = canonical_existing_path(hook_path)?;
+        let mut found = None;
+        for entry in entries {
+            if entry
+                .get("errors")
+                .and_then(Value::as_array)
+                .is_some_and(|errors| !errors.is_empty())
+            {
+                bail!("official hooks/list reported a hook configuration error");
+            }
+            let hooks = entry
+                .get("hooks")
+                .and_then(Value::as_array)
+                .ok_or_else(|| anyhow::anyhow!("official hooks/list entry omitted hooks"))?;
+            for hook in hooks {
+                if hook.get("eventName").and_then(Value::as_str) != Some("userPromptSubmit")
+                    || hook.get("handlerType").and_then(Value::as_str) != Some("command")
+                    || hook.get("command").and_then(Value::as_str) != Some(command)
+                {
+                    continue;
+                }
+                if hook.get("source").and_then(Value::as_str) != Some("user")
+                    || hook.get("isManaged").and_then(Value::as_bool) != Some(false)
+                {
+                    bail!("session continuity hook has an unexpected official ownership type");
+                }
+                let source_path = hook
+                    .get("sourcePath")
+                    .and_then(Value::as_str)
+                    .map(PathBuf::from)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("official session continuity hook omitted source path")
+                    })?;
+                if canonical_existing_path(&source_path)? != expected_source {
+                    continue;
+                }
+                let metadata = SessionContinuityHookMetadata {
+                    key: bounded_hook_field(hook, "key")?.to_owned(),
+                    current_hash: bounded_hook_field(hook, "currentHash")?.to_owned(),
+                    trust_status: bounded_hook_field(hook, "trustStatus")?.to_owned(),
+                    enabled: hook
+                        .get("enabled")
+                        .and_then(Value::as_bool)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "official session continuity hook omitted enabled state"
+                            )
+                        })?,
+                };
+                if found.replace(metadata).is_some() {
+                    bail!("official hooks/list returned duplicate session continuity hooks");
+                }
+            }
+        }
+        found.ok_or_else(|| {
+            anyhow::anyhow!(
+                "official app-server did not load the installed session continuity hook"
+            )
+        })
+    }
+
+    fn trust_session_continuity_hook(
+        &mut self,
+        codex_home: &Path,
+        hook_path: &Path,
+        command: &str,
+    ) -> Result<bool> {
+        let before = self.session_continuity_hook_metadata(codex_home, hook_path, command)?;
+        match before.trust_status.as_str() {
+            "trusted" if before.enabled => return Ok(false),
+            "trusted" | "untrusted" | "modified" => {}
+            "managed" => bail!("session continuity hook unexpectedly resolved as managed"),
+            _ => bail!("official app-server returned an unsupported hook trust state"),
+        }
+        let trust_value = json!({
+            before.key.clone(): {
+                "enabled": true,
+                "trusted_hash": before.current_hash.clone()
+            }
+        });
+        let result = self.server_mut()?.request(
+            "config/batchWrite",
+            json!({
+                "edits": [{
+                    "keyPath": "hooks.state",
+                    "value": trust_value,
+                    "mergeStrategy": "upsert"
+                }],
+                "expectedVersion": null,
+                "filePath": null,
+                "reloadUserConfig": true
+            }),
+        )?;
+        if result.get("status").and_then(Value::as_str) != Some("ok") {
+            bail!("official app-server did not confirm session continuity hook trust write");
+        }
+        let after = self.session_continuity_hook_metadata(codex_home, hook_path, command)?;
+        if after.key != before.key
+            || after.current_hash != before.current_hash
+            || after.trust_status != "trusted"
+            || !after.enabled
+        {
+            bail!("official app-server did not retain trusted session continuity hook state");
+        }
+        Ok(true)
     }
 
     fn shutdown(&mut self) {
@@ -575,6 +744,18 @@ impl SpawnedGoalStore {
     }
 }
 
+fn bounded_hook_field<'a>(hook: &'a Value, field: &str) -> Result<&'a str> {
+    let value = hook
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("official session continuity hook omitted {field}"))?;
+    if value.len() > 8192 || value.chars().any(char::is_control) {
+        bail!("official session continuity hook returned an invalid {field}");
+    }
+    Ok(value)
+}
+
 impl Drop for SpawnedGoalStore {
     fn drop(&mut self) {
         self.shutdown();
@@ -635,19 +816,154 @@ where
     T: IntoIterator,
     T::Item: AsRef<str>,
 {
+    let requested = validated_thread_ids(thread_ids)?;
     let daily = canonical_existing_path(daily_codex_home)?;
     let isolated = canonical_existing_path(isolated_codex_home)?;
     if daily == isolated {
         bail!("daily and isolated CODEX_HOME paths must be disjoint for session continuity");
     }
-    let mut daily_store = command.spawn(&daily)?;
-    let mut isolated_store = command.spawn(&isolated)?;
+    let previous = requested
+        .iter()
+        .map(|thread_id| {
+            Ok((
+                thread_id.clone(),
+                read_native_session_continuity(manifest_path, thread_id)?,
+            ))
+        })
+        .collect::<Result<BTreeMap<String, Option<NativeSessionContinuitySnapshot>>>>()?;
+    let plan = requested
+        .iter()
+        .map(|thread_id| {
+            (
+                thread_id.clone(),
+                previous.get(thread_id).is_none_or(Option::is_none),
+            )
+        })
+        .collect::<Vec<_>>();
+    let daily_reader = {
+        let command = command.clone();
+        let daily = daily.clone();
+        let plan = plan.clone();
+        thread::spawn(move || collect_session_heads_with_command(&command, &daily, &plan))
+    };
+    let isolated_reader = {
+        let command = command.clone();
+        let isolated = isolated.clone();
+        let plan = plan.clone();
+        thread::spawn(move || collect_session_heads_with_command(&command, &isolated, &plan))
+    };
+    let daily_result = daily_reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("daily session head reader panicked"));
+    let isolated_result = isolated_reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("isolated session head reader panicked"));
+    let mut daily_heads = daily_result??;
+    let mut isolated_heads = isolated_result??;
+    let mut daily_store = CollectedSessionHeadStore::default();
+    let mut isolated_store = CollectedSessionHeadStore::default();
+    for thread_id in &requested {
+        let previous = previous.get(thread_id).and_then(Option::as_ref);
+        let daily_head = daily_heads
+            .remove(thread_id)
+            .ok_or_else(|| anyhow::anyhow!("daily session head collection is incomplete"))?;
+        let isolated_head = isolated_heads
+            .remove(thread_id)
+            .ok_or_else(|| anyhow::anyhow!("isolated session head collection is incomplete"))?;
+        daily_store.heads.insert(
+            thread_id.clone(),
+            merge_incremental_session_head(previous.map(|snapshot| &snapshot.daily), daily_head)?,
+        );
+        isolated_store.heads.insert(
+            thread_id.clone(),
+            merge_incremental_session_head(
+                previous.map(|snapshot| &snapshot.isolated),
+                isolated_head,
+            )?,
+        );
+    }
     observe_native_session_continuity(
         &mut daily_store,
         &mut isolated_store,
-        thread_ids,
+        requested.iter().map(String::as_str),
         manifest_path,
     )
+}
+
+fn collect_session_heads_with_command(
+    command: &AppServerCommand,
+    codex_home: &Path,
+    plan: &[(String, bool)],
+) -> Result<BTreeMap<String, NativeSessionHead>> {
+    let mut store = command.spawn(codex_home)?;
+    let mut heads = BTreeMap::new();
+    for (thread_id, include_history) in plan {
+        heads.insert(
+            thread_id.clone(),
+            store.read_session_head_with_history(thread_id, *include_history)?,
+        );
+    }
+    Ok(heads)
+}
+
+fn merge_incremental_session_head(
+    previous: Option<&NativeSessionHead>,
+    mut current: NativeSessionHead,
+) -> Result<NativeSessionHead> {
+    let Some(previous) = previous else {
+        return Ok(current);
+    };
+    if current.thread_id != previous.thread_id {
+        bail!("incremental session head belongs to a different thread");
+    }
+    if current.turns.len() > 1 {
+        bail!("incremental session head unexpectedly contains history");
+    }
+    let Some(latest) = current.turns.first().cloned() else {
+        return Ok(current);
+    };
+    let previous_position = previous.turns.iter().position(|turn| turn.id == latest.id);
+    let mut turns = vec![latest];
+    let mut history_complete = false;
+    if let Some(position) = previous_position {
+        turns.extend(previous.turns.iter().skip(position + 1).cloned());
+        history_complete = previous.history_complete;
+    } else {
+        turns.extend(previous.turns.iter().cloned());
+    }
+    if turns.len() > MAX_CONTINUITY_HEAD_TURNS {
+        turns.truncate(MAX_CONTINUITY_HEAD_TURNS);
+        history_complete = false;
+    }
+    current.turns = turns;
+    current.history_complete = history_complete;
+    Ok(current)
+}
+
+fn sync_native_session_continuity_hooks_with_command(
+    command: &AppServerCommand,
+    daily_codex_home: &Path,
+    isolated_codex_home: &Path,
+    hook_command: &str,
+) -> Result<NativeSessionHookSyncReceipt> {
+    let daily = canonical_existing_path(daily_codex_home)?;
+    let isolated = canonical_existing_path(isolated_codex_home)?;
+    if daily == isolated {
+        bail!("daily and isolated CODEX_HOME paths must be disjoint for continuity hooks");
+    }
+    let mut receipt = NativeSessionHookSyncReceipt::default();
+    // Establish the isolated side before touching the user's daily home.
+    for home in [&isolated, &daily] {
+        let install = install_native_session_continuity_hook_file(home, hook_command)?;
+        receipt.files_updated += usize::from(install.updated);
+        let mut store = command.spawn(home)?;
+        if store.trust_session_continuity_hook(home, &install.path, hook_command)? {
+            receipt.trusted += 1;
+        } else {
+            receipt.already_trusted += 1;
+        }
+    }
+    Ok(receipt)
 }
 
 pub fn sync_native_goal_intents_via_official_app_server<T>(
@@ -696,7 +1012,43 @@ where
     .map(Some)
 }
 
-fn turn_checkpoint(turn: &Value) -> Result<NativeTurnCheckpoint> {
+pub fn sync_native_session_continuity_hooks_via_official_app_server(
+    daily_codex_home: &Path,
+    isolated_codex_home: &Path,
+    hook_command: &str,
+) -> Result<Option<NativeSessionHookSyncReceipt>> {
+    let Some(command) = discover_codex_app_server_command()? else {
+        return Ok(None);
+    };
+    sync_native_session_continuity_hooks_with_command(
+        &command,
+        daily_codex_home,
+        isolated_codex_home,
+        hook_command,
+    )
+    .map(Some)
+}
+
+fn turn_checkpoint(turn: &Value, items_complete: bool) -> Result<NativeTurnCheckpoint> {
+    let raw_items = turn
+        .get("items")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("official turn omitted items"))?;
+    if items_complete && raw_items.len() > MAX_CONTINUITY_HEAD_ITEMS {
+        bail!("official head turn exceeds the continuity item limit");
+    }
+    let items = raw_items
+        .iter()
+        .map(item_checkpoint)
+        .collect::<Result<Vec<_>>>()?;
+    turn_checkpoint_with_items(turn, &items, items_complete)
+}
+
+fn turn_checkpoint_with_items(
+    turn: &Value,
+    items: &[NativeTurnItemCheckpoint],
+    items_complete: bool,
+) -> Result<NativeTurnCheckpoint> {
     let id = turn
         .get("id")
         .and_then(Value::as_str)
@@ -709,26 +1061,6 @@ fn turn_checkpoint(turn: &Value) -> Result<NativeTurnCheckpoint> {
             .ok_or_else(|| anyhow::anyhow!("official turn omitted status"))?,
     )
     .context("official turn returned an unsupported status")?;
-    let item_keys = turn
-        .get("items")
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow::anyhow!("official turn omitted items"))?
-        .iter()
-        .map(|item| {
-            Ok(json!({
-                "id": item
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .filter(|value| !value.trim().is_empty())
-                    .ok_or_else(|| anyhow::anyhow!("official turn item omitted id"))?,
-                "type": item
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .filter(|value| !value.trim().is_empty())
-                    .ok_or_else(|| anyhow::anyhow!("official turn item omitted type"))?
-            }))
-        })
-        .collect::<Result<Vec<_>>>()?;
     let canonical = json!({
         "id": id,
         "status": turn.get("status").cloned().unwrap_or(Value::Null),
@@ -736,13 +1068,37 @@ fn turn_checkpoint(turn: &Value) -> Result<NativeTurnCheckpoint> {
         "completedAt": turn.get("completedAt").cloned().unwrap_or(Value::Null),
         "durationMs": turn.get("durationMs").cloned().unwrap_or(Value::Null),
         "error": turn.get("error").cloned().unwrap_or(Value::Null),
-        "items": item_keys
+        "items": items
     });
     let fingerprint = format!("{:x}", Sha256::digest(serde_json::to_vec(&canonical)?));
     Ok(NativeTurnCheckpoint {
         id,
         fingerprint,
         status,
+        item_count: items.len(),
+        items_complete,
+        last_item: items.last().cloned(),
+    })
+}
+
+fn item_checkpoint(item: &Value) -> Result<NativeTurnItemCheckpoint> {
+    Ok(NativeTurnItemCheckpoint {
+        id: item
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("official turn item omitted id"))?
+            .to_owned(),
+        item_type: item
+            .get("type")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("official turn item omitted type"))?
+            .to_owned(),
+        status: item
+            .get("status")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
     })
 }
 
@@ -826,6 +1182,13 @@ pub struct NativeGoalSyncReceipt {
     pub cleared_daily: usize,
     pub cleared_isolated: usize,
     pub conflicts: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NativeSessionHookSyncReceipt {
+    pub files_updated: usize,
+    pub trusted: usize,
+    pub already_trusted: usize,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -1393,13 +1756,13 @@ mod tests {
             serde_json::to_vec(&json!({thread_id: [
                 {
                     "id": "turn-daily",
-                    "items": [{"id": "item-daily", "type": "agentMessage", "text": "daily"}],
-                    "itemsView": "full",
-                    "status": "completed",
+                    "items": [{"id": "item-daily", "type": "agentMessage"}],
+                    "itemsView": "summary",
+                    "status": "inProgress",
                     "error": null,
                     "startedAt": 3,
-                    "completedAt": 4,
-                    "durationMs": 1000
+                    "completedAt": null,
+                    "durationMs": null
                 },
                 common.clone()
             ]}))
@@ -1411,8 +1774,8 @@ mod tests {
             serde_json::to_vec(&json!({thread_id: [
                 {
                     "id": "turn-isolated",
-                    "items": [{"id": "item-isolated", "type": "agentMessage", "text": "isolated"}],
-                    "itemsView": "full",
+                    "items": [{"id": "item-isolated", "type": "agentMessage"}],
+                    "itemsView": "summary",
                     "status": "interrupted",
                     "error": null,
                     "startedAt": 3,
@@ -1421,6 +1784,33 @@ mod tests {
                 },
                 common
             ]}))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            daily.join("fake-turn-items.json"),
+            serde_json::to_vec(&json!({thread_id: {
+                "turn-daily": [
+                    {"id": "item-daily", "type": "agentMessage", "text": "daily body"},
+                    {
+                        "id": "item-daily-command",
+                        "type": "commandExecution",
+                        "status": "inProgress",
+                        "aggregatedOutput": "private output"
+                    }
+                ]
+            }}))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            isolated.join("fake-turn-items.json"),
+            serde_json::to_vec(&json!({thread_id: {
+                "turn-isolated": [
+                    {"id": "item-isolated", "type": "agentMessage", "text": "isolated body"},
+                    {"id": "item-isolated-final", "type": "agentMessage", "text": "private final"}
+                ]
+            }}))
             .unwrap(),
         )
         .unwrap();
@@ -1443,11 +1833,181 @@ mod tests {
 
         assert_eq!(receipt.threads, 1);
         assert_eq!(receipt.diverged, 1);
-        let saved: Value = serde_json::from_slice(&fs::read(manifest).unwrap()).unwrap();
+        let saved: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
         assert_eq!(
             saved["records"][thread_id]["continuity"]["commonTurnId"],
             "turn-common"
         );
+        let daily_cursor = &saved["records"][thread_id]["continuity"]["dailyCursor"];
+        assert_eq!(daily_cursor["turnId"], "turn-daily");
+        assert_eq!(daily_cursor["turnStatus"], "inProgress");
+        assert_eq!(daily_cursor["itemId"], "item-daily-command");
+        assert_eq!(daily_cursor["itemType"], "commandExecution");
+        assert_eq!(daily_cursor["itemStatus"], "inProgress");
+        assert_eq!(daily_cursor["itemCount"], 2);
+        assert_eq!(daily_cursor["itemsComplete"], true);
+        assert_eq!(
+            saved["records"][thread_id]["continuity"]["isolatedCursor"]["itemId"],
+            "item-isolated-final"
+        );
+        let rendered = serde_json::to_string(&saved).unwrap();
+        assert!(!rendered.contains("daily body"));
+        assert!(!rendered.contains("private output"));
+        assert!(!rendered.contains("private final"));
+
+        for home in [&daily, &isolated] {
+            let _ = fs::remove_file(home.join("fake-turn-requests.jsonl"));
+        }
+        fs::write(
+            daily.join("fake-turns.json"),
+            serde_json::to_vec(&json!({thread_id: [
+                {
+                    "id": "turn-daily-next",
+                    "items": [{"id": "item-daily-next", "type": "agentMessage"}],
+                    "itemsView": "summary",
+                    "status": "inProgress",
+                    "error": null,
+                    "startedAt": 4,
+                    "completedAt": null,
+                    "durationMs": null
+                },
+                {
+                    "id": "turn-daily",
+                    "items": [{"id": "item-daily", "type": "agentMessage"}],
+                    "itemsView": "summary",
+                    "status": "inProgress",
+                    "error": null,
+                    "startedAt": 3,
+                    "completedAt": null,
+                    "durationMs": null
+                },
+                {
+                    "id": "turn-common",
+                    "items": [{"id": "item-common", "type": "agentMessage", "text": "common"}],
+                    "itemsView": "full",
+                    "status": "completed",
+                    "error": null,
+                    "startedAt": 1,
+                    "completedAt": 2,
+                    "durationMs": 1000
+                }
+            ]}))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            daily.join("fake-turn-items.json"),
+            serde_json::to_vec(&json!({thread_id: {
+                "turn-daily-next": [
+                    {"id": "item-daily-next", "type": "agentMessage", "text": "new body"},
+                    {"id": "item-daily-next-tool", "type": "commandExecution", "status": "completed"}
+                ]
+            }}))
+            .unwrap(),
+        )
+        .unwrap();
+
+        observe_native_session_continuity_with_command(
+            &command,
+            &daily,
+            &isolated,
+            [thread_id],
+            &manifest,
+        )
+        .unwrap();
+
+        let saved: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        assert_eq!(
+            saved["records"][thread_id]["continuity"]["dailyCursor"]["turnId"],
+            "turn-daily-next"
+        );
+        assert_eq!(
+            saved["records"][thread_id]["continuity"]["dailyCursor"]["itemId"],
+            "item-daily-next-tool"
+        );
+        assert_eq!(
+            saved["records"][thread_id]["daily"]["turns"][1]["id"],
+            "turn-daily"
+        );
+        for home in [&daily, &isolated] {
+            let requests = fs::read_to_string(home.join("fake-turn-requests.jsonl")).unwrap();
+            let requests = requests.lines().collect::<Vec<_>>();
+            assert_eq!(requests.len(), 1);
+            let request: Value = serde_json::from_str(requests[0]).unwrap();
+            assert_eq!(request["itemsView"], "full");
+            assert_eq!(request["limit"], 1);
+        }
+    }
+
+    #[test]
+    fn spawned_app_servers_install_and_trust_continuity_hooks_in_both_homes() {
+        let temp = tempdir().unwrap();
+        let daily = temp.path().join("daily");
+        let isolated = temp.path().join("isolated");
+        fs::create_dir_all(&daily).unwrap();
+        fs::create_dir_all(&isolated).unwrap();
+        fs::write(
+            daily.join("hooks.json"),
+            serde_json::to_vec_pretty(&json!({
+                "hooks": {
+                    "PreToolUse": [{
+                        "matcher": "shell_command",
+                        "hooks": [{"type": "command", "command": "cmd /c echo preserve", "timeout": 5}]
+                    }]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let script = temp.path().join("fake-app-server.mjs");
+        fs::write(&script, FAKE_APP_SERVER).unwrap();
+        let command = AppServerCommand {
+            program: find_node_executable(),
+            prefix_args: vec![script.into_os_string()],
+        };
+        let hook_command = "cmd /c codex-administrator session-continuity-hook";
+
+        let first = sync_native_session_continuity_hooks_with_command(
+            &command,
+            &daily,
+            &isolated,
+            hook_command,
+        )
+        .unwrap();
+        let second = sync_native_session_continuity_hooks_with_command(
+            &command,
+            &daily,
+            &isolated,
+            hook_command,
+        )
+        .unwrap();
+
+        assert_eq!(first.files_updated, 2);
+        assert_eq!(first.trusted, 2);
+        assert_eq!(first.already_trusted, 0);
+        assert_eq!(second.files_updated, 0);
+        assert_eq!(second.trusted, 0);
+        assert_eq!(second.already_trusted, 2);
+        let daily_hooks: Value =
+            serde_json::from_slice(&fs::read(daily.join("hooks.json")).unwrap()).unwrap();
+        assert_eq!(
+            daily_hooks["hooks"]["PreToolUse"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            daily_hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
+            hook_command
+        );
+        for home in [&daily, &isolated] {
+            let state: Value =
+                serde_json::from_slice(&fs::read(home.join("fake-hook-state.json")).unwrap())
+                    .unwrap();
+            assert_eq!(state.as_object().unwrap().len(), 1);
+            assert_eq!(
+                state.as_object().unwrap().values().next().unwrap()["trusted_hash"],
+                "sha256:continuity-test"
+            );
+        }
     }
 
     #[test]
@@ -1502,7 +2062,7 @@ mod tests {
     }
 
     const FAKE_APP_SERVER: &str = r#"
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 
@@ -1511,6 +2071,10 @@ const statePath = join(home, "fake-goals.json");
 const threadsPath = join(home, "fake-threads.json");
 const goalCapablePath = join(home, "fake-goal-capable.json");
 const turnsPath = join(home, "fake-turns.json");
+const turnItemsPath = join(home, "fake-turn-items.json");
+const turnRequestsPath = join(home, "fake-turn-requests.jsonl");
+const hooksPath = join(home, "hooks.json");
+const hookStatePath = join(home, "fake-hook-state.json");
 const load = () => {
   try { return JSON.parse(readFileSync(statePath, "utf8")); }
   catch { return {}; }
@@ -1561,10 +2125,92 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line)
     return;
   }
   if (request.method === "thread/turns/list") {
+    appendFileSync(turnRequestsPath, JSON.stringify(request.params) + "\n");
+    const allTurns = turns[threadId] ?? [];
+    const start = Number(request.params.cursor ?? 0);
+    const limit = Number(request.params.limit ?? allTurns.length);
+    let data = allTurns.slice(start, start + limit);
+    if (request.params.itemsView === "full") {
+      let turnItems = {};
+      try { turnItems = JSON.parse(readFileSync(turnItemsPath, "utf8")); } catch {}
+      data = data.map((turn) => ({
+        ...turn,
+        items: turnItems[threadId]?.[turn.id] ?? turn.items,
+        itemsView: "full"
+      }));
+    }
+    const next = start + data.length;
     send({ id: request.id, result: {
-      data: turns[threadId] ?? [],
-      nextCursor: null,
+      data,
+      nextCursor: next < allTurns.length ? String(next) : null,
       backwardsCursor: null
+    }});
+    return;
+  }
+  if (request.method === "thread/turns/items/list") {
+    send({ id: request.id, error: {
+      code: -32601,
+      message: "thread/turns/items/list is not supported yet"
+    }});
+    return;
+  }
+  if (request.method === "hooks/list") {
+    let hooks = {};
+    try { hooks = JSON.parse(readFileSync(hooksPath, "utf8")); } catch {}
+    const groups = hooks?.hooks?.UserPromptSubmit ?? [];
+    let found = null;
+    for (let groupIndex = 0; groupIndex < groups.length && !found; groupIndex++) {
+      const handlers = groups[groupIndex]?.hooks ?? [];
+      for (let handlerIndex = 0; handlerIndex < handlers.length; handlerIndex++) {
+        const handler = handlers[handlerIndex];
+        if (typeof handler?.command === "string" && handler.command.includes("session-continuity-hook")) {
+          found = { groupIndex, handlerIndex, handler };
+          break;
+        }
+      }
+    }
+    let state = {};
+    try { state = JSON.parse(readFileSync(hookStatePath, "utf8")); } catch {}
+    const metadata = found ? (() => {
+      const key = `${hooksPath}:user_prompt_submit:${found.groupIndex}:${found.handlerIndex}`;
+      const currentHash = "sha256:continuity-test";
+      return {
+        key,
+        eventName: "userPromptSubmit",
+        handlerType: "command",
+        matcher: null,
+        command: found.handler.command,
+        timeoutSec: found.handler.timeout ?? 5,
+        statusMessage: null,
+        sourcePath: hooksPath,
+        source: "user",
+        pluginId: null,
+        displayOrder: found.groupIndex,
+        enabled: state[key]?.enabled ?? true,
+        isManaged: false,
+        currentHash,
+        trustStatus: state[key]?.trusted_hash === currentHash ? "trusted" : "untrusted"
+      };
+    })() : null;
+    send({ id: request.id, result: {
+      data: [{ cwd: request.params.cwds?.[0] ?? home, hooks: metadata ? [metadata] : [], warnings: [], errors: [] }]
+    }});
+    return;
+  }
+  if (request.method === "config/batchWrite") {
+    let state = {};
+    try { state = JSON.parse(readFileSync(hookStatePath, "utf8")); } catch {}
+    for (const edit of request.params.edits ?? []) {
+      if (edit.keyPath === "hooks.state" && edit.value && typeof edit.value === "object") {
+        Object.assign(state, edit.value);
+      }
+    }
+    writeFileSync(hookStatePath, JSON.stringify(state));
+    send({ id: request.id, result: {
+      status: "ok",
+      version: "sha256:fake",
+      filePath: join(home, "config.toml"),
+      overriddenMetadata: null
     }});
     return;
   }
