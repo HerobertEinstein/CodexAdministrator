@@ -41,12 +41,12 @@ The current deployment does not yet satisfy this boundary. Its session import
 runs at managed launch and the isolated copy can remain behind while the daily
 task advances. Do not describe current task import as real-time or lossless.
 
-The current uncommitted source foundation now includes exact-head comparison,
-an atomic compact continuity manifest, official read/turn RPC head collection,
-and an event-driven Windows session-directory monitor. A real two-home Rust
-probe passed. The observer is not wired into the managed launcher or deployed.
-An independent app-server received zero notifications while the daily desktop
-advanced, so cross-process notifications cannot replace the directory trigger.
+Local commit `8d5829c` includes exact-head comparison, an atomic compact
+continuity manifest, official read/turn RPC head collection, and an event-driven
+Windows session-directory monitor. A real two-home Rust probe passed. The
+observer is not wired into the managed launcher or deployed. An independent
+app-server received zero notifications while the daily desktop advanced, so
+cross-process notifications cannot replace the directory trigger.
 
 ## Use Next Time
 
